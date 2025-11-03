@@ -30,8 +30,8 @@ parser = Lark(r"""
 
     """, start='start')
 
-parsed_tree = parser.parse("[6-10]^<5,3,6>*|[3-5]^<4,7,9>")
+parsed_tree = parser.parse("[6-10]^<5,7,9>*|[3-5]^<4,7,9>")
 prop = build_prop(parsed_tree)
-print(parsed_tree.pretty())
+#print(parsed_tree.pretty())
 matcher = Matcher(prop, RandomOracle(), [0 for i in range(0,50)])
 print(matcher.match())

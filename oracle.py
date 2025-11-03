@@ -8,4 +8,6 @@ class Oracle(ABC):
 
 class RandomOracle(Oracle):
 	def compute(query: int, trace: list[object], fromm: int, to: int) -> float:
-		return random.random()
+		response = random.random()
+		print("Response:",response)
+		return response

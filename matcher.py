@@ -23,6 +23,20 @@ class Matcher:
 			return self._get_concat_query_dnf(prop, length)
 		if isinstance(prop, StarProp):
 			return self._get_star_query_dnf(prop, length)
+		if isinstance(prop, RefineProp):
+			return self._get_refine_query_dnf(prop, length)
+		
+	def _get_refine_query_dnf(self, prop: RefineProp, length: int):
+		if length < prop.lb or length > prop.ub:
+			return self._cache_query_pair(prop, length, None)
+		child_clause = self._get_query_dnf(prop.child, length)
+		if child_clause is not None:
+			clause = set()
+			clause.update(child_clause)
+			clause.add((prop.query_id, 0, length))
+			print(clause)
+			return self._cache_query_pair(prop, length, clause)
+		return self._cache_query_pair(prop, length, None)
 		
 	def _conjunct_query_dnfs(self, idx: int, output_clause:Optional[set[set[Tuple[int,int,int]]]], dnf_left: Optional[set[set[Tuple[int,int,int]]]], dnf_right: Optional[set[set[Tuple[int,int,int]]]]):
 		for clause_left in dnf_left:
@@ -88,7 +102,9 @@ class Matcher:
 		for clause in query_dnf:
 			clause_val = 1
 			for pair in clause:
-				clause_val = min(1,self._oracle.compute(pair[0], self._trace, pair[1], pair[2]))
+				if pair not in self._query_cache:
+					self._query_cache[pair] = self._oracle.compute(pair[0], self._trace, pair[1], pair[2])
+				clause_val = min(1,self._query_cache[pair])
 				if clause_val == 0.0:
 					break
 			output = max(output, clause_val)
