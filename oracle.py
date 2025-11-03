@@ -3,11 +3,10 @@ import random
 
 class Oracle(ABC):
 	@abstractmethod
-	def compute(query: int, trace: list[object], fromm: int, to: int) -> float:
+	def compute(self, query: int, trace: list[object], fromm: int, to: int) -> float:
 		pass
 
 class RandomOracle(Oracle):
-	def compute(query: int, trace: list[object], fromm: int, to: int) -> float:
+	def compute(self, query: int, trace: list[object], fromm: int, to: int) -> float:
 		response = random.random()
-		print("Response:",response)
 		return response

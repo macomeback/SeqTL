@@ -29,30 +29,41 @@ class Matcher:
 	def _get_refine_query_dnf(self, prop: RefineProp, length: int):
 		if length < prop.lb or length > prop.ub:
 			return self._cache_query_pair(prop, length, None)
-		child_clause = self._get_query_dnf(prop.child, length)
-		if child_clause is not None:
-			clause = set()
-			clause.update(child_clause)
-			clause.add((prop.query_id, 0, length))
-			print(clause)
-			return self._cache_query_pair(prop, length, clause)
+		child_dnf = self._get_query_dnf(prop.child, length)
+		if child_dnf is not None:
+			dnf = set()
+			if len(child_dnf) == 0:
+				dnf.add(frozenset({(prop.query_id, 0, length)}))
+			else:
+				for child_clause in child_dnf:
+					clause = set()
+					clause.update(child_clause)
+					clause.add((prop.query_id, 0, length))
+					dnf.add(clause)
+			return self._cache_query_pair(prop, length, dnf)
 		return self._cache_query_pair(prop, length, None)
 		
-	def _conjunct_query_dnfs(self, idx: int, output_clause:Optional[set[set[Tuple[int,int,int]]]], dnf_left: Optional[set[set[Tuple[int,int,int]]]], dnf_right: Optional[set[set[Tuple[int,int,int]]]]):
+	def _conjunct_query_dnfs(self, idx: int, output_clause:set[set[Tuple[int,int,int]]], dnf_left: set[set[Tuple[int,int,int]]], dnf_right: set[set[Tuple[int,int,int]]]):
+		if len(dnf_left) == 0:
+			output_clause.update(dnf_right)
+			return
+		if len(dnf_right) == 0:
+			output_clause.update(dnf_left)
+			return
 		for clause_left in dnf_left:
 				for clause_right in dnf_right:
 					dnf_clause = set()
 					dnf_clause.update(clause_left)
 					for pair in clause_right:
 						dnf_clause.add((pair[0], pair[1]+idx, pair[2]+idx))
-					output_clause.add(dnf_clause)
+					output_clause.add(frozenset(dnf_clause))
 		
 	def _get_star_query_dnf(self, prop: SeqTLProp, length: int) -> Optional[set[set[Tuple[int,int,int]]]]:
 		if length == 0:
 			return self._cache_query_pair(prop, length, set())
 		output_clause = set()
 		valid_match = False
-		for i in range(0, length+1):
+		for i in range(1, length+1):
 			dnf_left = self._get_query_dnf(prop.child, i)
 			if dnf_left is None:
 				continue
@@ -83,18 +94,18 @@ class Matcher:
 		
 		
 	def _get_union_query_dnf(self, prop: SeqTLProp, length: int) -> Optional[set[set[Tuple[int,int,int]]]]:
-		clause_left = self._get_query_dnf(prop.left, length)
-		clause_right = self._get_query_dnf(prop.right, length)
-		if clause_left is None:
-			if clause_right is None:
+		dnf_left = self._get_query_dnf(prop.left, length)
+		dnf_right = self._get_query_dnf(prop.right, length)
+		if dnf_left is None:
+			if dnf_right is None:
 				return self._cache_query_pair(prop, length, None)
-			return self._cache_query_pair(prop, length, clause_right)
-		if clause_right is None:
-			return self._cache_query_pair(prop, length, clause_left)
-		return self._cache_query_pair(prop, length, clause_left.union(clause_right))
+			return self._cache_query_pair(prop, length, dnf_right)
+		if dnf_right is None:
+			return self._cache_query_pair(prop, length, dnf_left)
+		return self._cache_query_pair(prop, length, dnf_left.union(dnf_right))
 
 	def _cache_query_pair(self, prop: SeqTLProp, length: int, value: Optional[set[set[Tuple[int,int,int]]]]) -> Optional[set[set[Tuple[int,int,int]]]]:
-		self._query_dnf_cache[prop, length] = value 
+		self._query_dnf_cache[prop, length] = value
 		return value
 	
 	def evaluate(self, query_dnf: set[set[Tuple[int,int,int]]]):
