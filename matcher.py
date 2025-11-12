@@ -43,25 +43,30 @@ class Matcher:
 			return self._cache_query_pair(prop, length, dnf)
 		return self._cache_query_pair(prop, length, None)
 		
-	def _conjunct_query_dnfs(self, idx: int, output_clause:set[set[Tuple[int,int,int]]], dnf_left: set[set[Tuple[int,int,int]]], dnf_right: set[set[Tuple[int,int,int]]]):
+	def _conjunct_query_dnfs(self, idx: int, output_dnf:set[set[Tuple[int,int,int]]], dnf_left: set[set[Tuple[int,int,int]]], dnf_right: set[set[Tuple[int,int,int]]]):
 		if len(dnf_left) == 0:
-			output_clause.update(dnf_right)
+			for clause_right in dnf_right:
+					output_dnf.add(frozenset(self.shift_clause_index(idx, clause_right)))
 			return
 		if len(dnf_right) == 0:
-			output_clause.update(dnf_left)
+			output_dnf.update(dnf_left)
 			return
 		for clause_left in dnf_left:
 				for clause_right in dnf_right:
-					dnf_clause = set()
+					dnf_clause = self.shift_clause_index(idx, clause_right)
 					dnf_clause.update(clause_left)
-					for pair in clause_right:
-						dnf_clause.add((pair[0], pair[1]+idx, pair[2]+idx))
-					output_clause.add(frozenset(dnf_clause))
+					output_dnf.add(frozenset(dnf_clause))
+
+	def shift_clause_index(self, idx: int, to_shift_clause: set[Tuple[int,int,int]]) -> set[Tuple[int,int,int]]:
+		dnf_clause = set()
+		for pair in to_shift_clause:
+			dnf_clause.add((pair[0], pair[1]+idx, pair[2]+idx))
+		return dnf_clause
 		
 	def _get_star_query_dnf(self, prop: SeqTLProp, length: int) -> Optional[set[set[Tuple[int,int,int]]]]:
 		if length == 0:
 			return self._cache_query_pair(prop, length, set())
-		output_clause = set()
+		output_dnf = set()
 		valid_match = False
 		for i in range(1, length+1):
 			dnf_left = self._get_query_dnf(prop.child, i)
@@ -71,13 +76,13 @@ class Matcher:
 			if dnf_right is None:
 				continue
 			valid_match = True
-			self._conjunct_query_dnfs(i,output_clause, dnf_left, dnf_right)
+			self._conjunct_query_dnfs(i,output_dnf, dnf_left, dnf_right)
 		if not valid_match:
 			return self._cache_query_pair(prop, length, None)
-		return self._cache_query_pair(prop, length, output_clause)
+		return self._cache_query_pair(prop, length, output_dnf)
 		
 	def _get_concat_query_dnf(self, prop: SeqTLProp, length: int) -> Optional[set[set[Tuple[int,int,int]]]]:
-		output_clause = set()
+		output_dnf = set()
 		valid_match = False
 		for i in range(0, length+1):
 			dnf_left = self._get_query_dnf(prop.left, i)
@@ -87,10 +92,10 @@ class Matcher:
 			if dnf_right is None:
 				continue
 			valid_match = True
-			self._conjunct_query_dnfs(i,output_clause, dnf_left, dnf_right)
+			self._conjunct_query_dnfs(i,output_dnf, dnf_left, dnf_right)
 		if not valid_match:
 			return self._cache_query_pair(prop, length, None)
-		return self._cache_query_pair(prop, length, output_clause)
+		return self._cache_query_pair(prop, length, output_dnf)
 		
 		
 	def _get_union_query_dnf(self, prop: SeqTLProp, length: int) -> Optional[set[set[Tuple[int,int,int]]]]:
@@ -114,8 +119,8 @@ class Matcher:
 			clause_val = 1
 			for pair in clause:
 				if pair not in self._query_cache:
-					self._query_cache[pair] = self._oracle.compute(pair[0], self._trace, pair[1], pair[2])
-				clause_val = min(1,self._query_cache[pair])
+					self._query_cache[pair] = self._oracle.compute(pair[0], self._trace[pair[1]:pair[2]])
+				clause_val = min(clause_val,self._query_cache[pair])
 				if clause_val == 0.0:
 					break
 			output = max(output, clause_val)
