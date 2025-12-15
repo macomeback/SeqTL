@@ -128,7 +128,7 @@ class VideoOracle:
 	def get_id_traces(self, trace: list[list[list[float]]]) -> dict[int, list[list[list[float]]]]:
 		id_traces: dict[int, list[list[list[float]]]] = {}
 		for box in trace[0]:
-			class_id = int(box[5])
+			class_id = int(float(box[5]))
 			if class_id not in id_traces:
 				id_traces[class_id] = [[]]
 			id_traces[class_id][0].add(box)
