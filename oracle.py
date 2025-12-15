@@ -97,7 +97,7 @@ class VideoOracle:
 		iou_val = intersection_area / float(union_area)
 		return iou_val
 	    
-	def match_boxes(self, prev_boxes: dict[int, list[float]], boxes: set[list[float]], max_index: int) -> dict[int, list[float]]:
+	def match_boxes(self, prev_boxes: dict[int, list[float]], boxes: list[list[float]], max_index: int) -> dict[int, list[float]]:
 		matching = {}
 		for box in boxes:
 			threshold = 0.5
@@ -114,7 +114,7 @@ class VideoOracle:
 				max_index += 1
 		return matching
 	    
-	def track(self, id_trace: list[set[list[float]]]) -> list[dict[int, list[float]]]:
+	def track(self, id_trace: list[list[list[float]]]) -> list[dict[int, list[float]]]:
 		tracks = []
 		max_index = len(id_trace[0])-1
 		initial_objs = {}
@@ -125,12 +125,12 @@ class VideoOracle:
 			tracks.append(self.match_boxes(tracks[i-1], id_trace[i],max_index))
 		return tracks
 
-	def get_id_traces(self, trace: list[set[list[float]]]) -> dict[int, list[set[list[float]]]]:
-		id_traces: dict[int, list[set[list[float]]]] = {}
+	def get_id_traces(self, trace: list[list[list[float]]]) -> dict[int, list[list[list[float]]]]:
+		id_traces: dict[int, list[list[list[float]]]] = {}
 		for box in trace[0]:
 			class_id = int(box[5])
 			if class_id not in id_traces:
-				id_traces[class_id] = [set()]
+				id_traces[class_id] = [[]]
 			id_traces[class_id][0].add(box)
 		id_traces_new = {}
 		for class_id, id_trace in id_traces.items():
@@ -142,7 +142,7 @@ class VideoOracle:
 				class_id = int(box[5])
 				if class_id in id_traces:
 					if i == len(id_traces[class_id]):
-						id_traces[class_id].append(set())
+						id_traces[class_id].append([[]])
 					id_traces[class_id][i].add(box)
 			for class_id in id_traces.keys():
 				if len(id_traces[class_id]) < i+1 or len(id_traces[class_id][i]) < 2:
@@ -176,7 +176,7 @@ class VideoOracle:
 			confidence = min(confidence, id_track[i][idx1][4], id_track[i][idx2][4])
 		return confidence
 			
-	def distance_direction(self, trace: list[set[list[float]]], is_closer: bool) -> float:
+	def distance_direction(self, trace: list[list[list[float]]], is_closer: bool) -> float:
 		id_traces = self.get_id_traces(trace)
 		confidence = 0.0
 		for _, id_trace in id_traces.items():
@@ -186,6 +186,6 @@ class VideoOracle:
 				for j in range(i+1, len(objects)):
 					confidence = max(confidence, self.getting_closer(id_track, i, j) if is_closer else self.getting_further(id_track, i, j))
 			
-	def compute(self, query_id: int, trace: list[set[list[float]]]) -> float:
+	def compute(self, query_id: int, trace: list[list[list[float]]]) -> float:
 		return self.distance_direction(trace, self._queries[query_id] == "close")
 			
