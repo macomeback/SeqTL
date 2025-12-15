@@ -1,7 +1,7 @@
 import random
 import numpy as np
-import torch
-from numpy.typing import NDArray, Shape
+#import torch
+#from numpy.typing import NDArray, Shape
 from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 
