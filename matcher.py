@@ -1,4 +1,3 @@
-from oracle import Oracle
 from prop import *
 from typing import Tuple, Optional
 
