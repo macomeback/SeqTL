@@ -156,7 +156,7 @@ class VideoOracle:
 		y2 = (box2[1]+box2[3])/2
 		return (x1-x2)**2+(y1-y2)**2
 
-	def getting_closer(self, id_track:list[dict[int, list[float]]] , idx1: int, idx2: int):
+	def getting_closer(self, id_track:list[dict[int, list[float]]] , idx1: int, idx2: int) -> float:
 		init_distance = self.get_distance(id_track[0][idx1], id_track[0][idx2])
 		confidence = min(id_track[0][idx1][4], id_track[0][idx2][4])
 		for i in range(1, len(id_track)):
@@ -166,25 +166,26 @@ class VideoOracle:
 			confidence = min(confidence, id_track[i][idx1][4], id_track[i][idx2][4])
 		return confidence
 	
-	def getting_further(self, id_track:list[dict[int, list[float]]] , idx1: int, idx2: int):
+	def getting_further(self, id_track:list[dict[int, list[float]]] , idx1: int, idx2: int) -> float:
 		init_distance = self.get_distance(id_track[0][idx1], id_track[0][idx2])
 		confidence = min(id_track[0][idx1][4], id_track[0][idx2][4])
 		for i in range(1, len(id_track)):
 			distance = self.get_distance(id_track[i][idx1], id_track[i][idx2])
-			if init_distance*1.05 < distance or (i == len(id_track)-1 and init_distance*0.95 < distance):
+			if init_distance*0.95 > distance or (i == len(id_track)-1 and init_distance*1.05 > distance):
 				return 0.0
 			confidence = min(confidence, id_track[i][idx1][4], id_track[i][idx2][4])
 		return confidence
 			
 	def distance_direction(self, trace: list[set[list[float]]], is_closer: bool) -> float:
 		id_traces = self.get_id_traces(trace)
+		confidence = 0.0
 		for _, id_trace in id_traces.items():
 			id_track = self.track(id_trace)
 			objects = list(id_track[0].keys())
 			for i in range(len(objects)):
 				for j in range(i+1, len(objects)):
-
+					confidence = max(confidence, self.getting_closer(id_track, i, j) if is_closer else self.getting_further(id_track, i, j))
 			
-	def compute(self, query_id: int, trace: list[object]) -> float:
-		if self._queries[query_id] == "close":
+	def compute(self, query_id: int, trace: list[set[list[float]]]) -> float:
+		return self.distance_direction(trace, self._queries[query_id] == "close")
 			
