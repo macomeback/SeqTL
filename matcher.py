@@ -3,7 +3,7 @@ from prop import *
 from typing import Tuple, Optional
 
 class Matcher:
-	def __init__(self, prop: SeqTLProp, oracle: Oracle, trace: list[object]):
+	def __init__(self, prop: SeqTLProp, oracle, trace):
 		self._prop = prop
 		self._oracle = oracle
 		self._trace = trace
