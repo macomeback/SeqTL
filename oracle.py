@@ -131,7 +131,7 @@ class VideoOracle:
 			class_id = int(float(box[5]))
 			if class_id not in id_traces:
 				id_traces[class_id] = [[]]
-			id_traces[class_id][0].add(box)
+			id_traces[class_id][0].append(box)
 		id_traces_new = {}
 		for class_id, id_trace in id_traces.items():
 			if len(id_trace[0]) >= 2:
@@ -143,7 +143,7 @@ class VideoOracle:
 				if class_id in id_traces:
 					if i == len(id_traces[class_id]):
 						id_traces[class_id].append([[]])
-					id_traces[class_id][i].add(box)
+					id_traces[class_id][i].append(box)
 			for class_id in id_traces.keys():
 				if len(id_traces[class_id]) < i+1 or len(id_traces[class_id][i]) < 2:
 					del id_traces[class_id]
