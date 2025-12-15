@@ -2,7 +2,7 @@ from prop import *
 from lark import Lark
 from prop_builder import PropBuilder
 from matcher import Matcher
-from oracle import ShapeExpressionOracle
+from oracle import ShapeExpressionOracle, VideoOracle
 import os
 
 def read_boxes(file_path:str) -> list[list[list[float]]]:
@@ -53,5 +53,5 @@ dir_path = '../prep-charades'
 for file_name in os.listdir(dir_path):
         file_path = os.path.join(dir_path, file_name)
         trace = read_boxes(file_path)
-        matcher = Matcher(prop, ShapeExpressionOracle(query_map), trace)
+        matcher = Matcher(prop, VideoOracle(query_map), trace)
         print(matcher.match())
