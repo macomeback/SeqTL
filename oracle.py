@@ -76,7 +76,7 @@ class VideoOracle:
 
 	def _fill_queries(self, query_map):
 		for query_str, query_id in query_map.items():
-			self.queries[query_id] = query_str
+			self._queries[query_id] = query_str
 			
 	def iou(self, boxA: list[float], boxB: list[float]) -> float:
 		# Determine the coordinates of the intersection rectangle
