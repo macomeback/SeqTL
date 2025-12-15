@@ -139,7 +139,7 @@ class VideoOracle:
 		id_traces = id_traces_new
 		for i in range(1, len(trace)):
 			for box in trace[i]:
-				class_id = int(box[5])
+				class_id = int(float(box[5]))
 				if class_id in id_traces:
 					if i == len(id_traces[class_id]):
 						id_traces[class_id].append([[]])
