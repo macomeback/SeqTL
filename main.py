@@ -5,13 +5,13 @@ from matcher import Matcher
 from oracle import ShapeExpressionOracle
 import os
 
-def read_boxes(file_path:str) -> list[set[list[float]]]:
+def read_boxes(file_path:str) -> list[list[list[float]]]:
     trace = []
     f = open(file_path, 'r')
     for line in f:
-        boxes = set()
+        boxes = []
         for box in line.split():
-            boxes.add(box.split(',')[:-1])
+            boxes.append(box.split(',')[:-1])
         trace.append(boxes)
     return trace
 
