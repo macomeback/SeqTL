@@ -185,6 +185,7 @@ class VideoOracle:
 			for i in range(len(objects)):
 				for j in range(i+1, len(objects)):
 					confidence = max(confidence, self.getting_closer(id_track, i, j) if is_closer else self.getting_further(id_track, i, j))
+		return confidence
 			
 	def compute(self, query_id: int, trace: list[list[list[float]]]) -> float:
 		return self.distance_direction(trace, self._queries[query_id] == "close")
