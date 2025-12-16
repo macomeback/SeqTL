@@ -103,6 +103,8 @@ class VideoOracle:
 			threshold = 0.5
 			matched = -1
 			for i, prev_box in prev_boxes.items():
+				if len(box) == 0:
+					continue
 				iou_val = self.iou(box, prev_box)
 				if iou_val >= threshold:
 					matched = i
