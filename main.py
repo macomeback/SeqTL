@@ -11,7 +11,7 @@ def read_boxes(file_path:str) -> list[list[list[float]]]:
     for line in f:
         boxes = []
         for box in line.split():
-            boxes.append([x for x in box.split(',') if len(x)>0])
+            boxes.append([float(x) for x in box.split(',') if len(x)>0])
             assert len(boxes[-1]) == 6
         trace.append(boxes)
     return trace
