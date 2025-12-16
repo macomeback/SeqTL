@@ -100,11 +100,11 @@ class VideoOracle:
 	def match_boxes(self, prev_boxes: dict[int, list[float]], boxes: list[list[float]], max_index: int) -> dict[int, list[float]]:
 		matching = {}
 		for box in boxes:
+			if len(box) == 0:
+				continue
 			threshold = 0.5
 			matched = -1
 			for i, prev_box in prev_boxes.items():
-				if len(box) == 0:
-					continue
 				iou_val = self.iou(box, prev_box)
 				if iou_val >= threshold:
 					matched = i
@@ -118,10 +118,13 @@ class VideoOracle:
 	    
 	def track(self, id_trace: list[list[list[float]]]) -> list[dict[int, list[float]]]:
 		tracks = []
-		max_index = len(id_trace[0])-1
 		initial_objs = {}
+		idx = 0
 		for i in range(0, len(id_trace[0])):
-			initial_objs[i] = id_trace[i]
+			if len(id_trace[0][i])>0:
+				initial_objs[idx] = id_trace[0][i]
+				idx+=1
+		max_index = idx-1
 		tracks.append(initial_objs)
 		for i in range(1, len(id_trace)):
 			tracks.append(self.match_boxes(tracks[i-1], id_trace[i],max_index))
@@ -146,9 +149,12 @@ class VideoOracle:
 					if i == len(id_traces[class_id]):
 						id_traces[class_id].append([[]])
 					id_traces[class_id][i].append(box)
+			to_del = set()
 			for class_id in id_traces.keys():
 				if len(id_traces[class_id]) < i+1 or len(id_traces[class_id][i]) < 2:
-					del id_traces[class_id]
+					to_del.add(class_id)
+			for class_id in to_del:
+				del id_traces[class_id]
 		return id_traces
 	
 	def get_distance(self, box1: list[float], box2: list[float]) -> float:
@@ -162,6 +168,8 @@ class VideoOracle:
 		init_distance = self.get_distance(id_track[0][idx1], id_track[0][idx2])
 		confidence = min(id_track[0][idx1][4], id_track[0][idx2][4])
 		for i in range(1, len(id_track)):
+			if idx1 not in id_track[i] or idx2 not in id_track[i]:
+				return 0.0
 			distance = self.get_distance(id_track[i][idx1], id_track[i][idx2])
 			if init_distance*1.05 < distance or (i == len(id_track)-1 and init_distance*0.95 < distance):
 				return 0.0
@@ -172,6 +180,8 @@ class VideoOracle:
 		init_distance = self.get_distance(id_track[0][idx1], id_track[0][idx2])
 		confidence = min(id_track[0][idx1][4], id_track[0][idx2][4])
 		for i in range(1, len(id_track)):
+			if idx1 not in id_track[i] or idx2 not in id_track[i]:
+				return 0.0
 			distance = self.get_distance(id_track[i][idx1], id_track[i][idx2])
 			if init_distance*0.95 > distance or (i == len(id_track)-1 and init_distance*1.05 > distance):
 				return 0.0

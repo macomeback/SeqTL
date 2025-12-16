@@ -55,4 +55,7 @@ for file_name in os.listdir(dir_path):
         file_path = os.path.join(dir_path, file_name)
         trace = read_boxes(file_path)
         matcher = Matcher(prop, VideoOracle(query_map), trace)
-        print(matcher.match())
+        score = matcher.match()
+        if score>0.0:
+             print(file_name)
+             print("Matched", score)
