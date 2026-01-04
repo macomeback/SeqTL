@@ -2,13 +2,13 @@ from prop import *
 from typing import Tuple, Optional
 
 class Matcher:
-	def __init__(self, prop: SeqTLProp, oracle, trace):
+	def __init__(self, prop: SeqTLProp, oracle):
 		self._prop = prop
-		self._oracle = oracle
-		self._trace = trace
+		self.oracle = oracle
+		self._trace = []
 		self._query_cache: dict[Tuple[int,int,int], float] = {}
 		self._query_dnf_cache: dict[Tuple[SeqTLProp,int], Optional[set[set[Tuple[int,int,int]]]]] = {}
-	
+
 	def _get_query_dnf(self, prop: SeqTLProp, length: int) -> Optional[set[set[Tuple[int,int,int]]]]:
 		if (prop, length) in self._query_dnf_cache:
 			return self._query_dnf_cache[prop, length]
@@ -118,7 +118,7 @@ class Matcher:
 			clause_val = 1
 			for pair in clause:
 				if pair not in self._query_cache:
-					self._query_cache[pair] = self._oracle.compute(pair[0], self._trace[pair[1]:pair[2]])
+					self._query_cache[pair] = self.oracle.compute(pair[0], pair[1], pair[2])
 				clause_val = min(clause_val,self._query_cache[pair])
 				if clause_val == 0.0:
 					break
@@ -127,8 +127,9 @@ class Matcher:
 				return output
 		return output
 
-	def match(self) -> float:
-		query_dnf = self._get_query_dnf(self._prop, len(self._trace))
+	def match(self, frame) -> float:
+		self.oracle.add_frame(frame)
+		query_dnf = self._get_query_dnf(self._prop, len(self.oracle.trace))
 		if query_dnf is None:
 			return 0.0
 		return self.evaluate(query_dnf)

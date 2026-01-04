@@ -73,22 +73,37 @@ class VideoOracle:
 	def __init__(self, query_map: dict[str, int]):
 		self._queries: list = [None]*len(query_map)
 		self._fill_queries(query_map)
+		self.trace = []
+		self.obj_traces = {}
+		self.max_id = -1
 
 	def _fill_queries(self, query_map):
 		for query_str, query_id in query_map.items():
 			self._queries[query_id] = query_str
 			
-	def iou(self, boxA: list[float], boxB: list[float]) -> float:
+	def iou(self, box1, box2) -> float:
+		center1 = box1['center']
+		dim1 = box1['dimensions']
+		x1_left = center1['x']-dim1['w']/2
+		x1_right = center1['x']+dim1['w']/2
+		y1_top = center1['x']-dim1['h']/2
+		y1_bottom = center1['y']+dim1['h']/2
+		center2 = box2['center']
+		dim2 = box2['dimensions']
+		x2_left = center2['x']-dim2['w']/2
+		x2_right = center2['x']-dim2['w']/2
+		y2_top = center2['x']-dim2['h']/2
+		y2_bottom = center2['y']+dim2['h']/2
 		# Determine the coordinates of the intersection rectangle
-		x_left = max(boxA[0], boxB[0])
-		y_top = max(boxA[1], boxB[1])
-		x_right = min(boxA[2], boxB[2])
-		y_bottom = min(boxA[3], boxB[3])
+		x_left = max(x1_left, x2_left)
+		y_top = max(y1_top, y2_top)
+		x_right = min(x1_right, x2_right)
+		y_bottom = min(y1_bottom, y2_bottom)
 		# Compute the area of intersection rectangle
 		intersection_area = max(0, x_right - x_left) * max(0, y_bottom - y_top)
 		# Compute the area of both bounding boxes
-		boxA_area = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1])
-		boxB_area = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1])
+		boxA_area = dim1['w']*dim1['h']
+		boxB_area = dim2['w']*dim2['h']
 		# Compute the union area
 		union_area = boxA_area + boxB_area - intersection_area
 		# Compute the IoU, handling potential division by zero
@@ -97,108 +112,106 @@ class VideoOracle:
 		iou_val = intersection_area / float(union_area)
 		return iou_val
 	    
-	def match_boxes(self, prev_boxes: dict[int, list[float]], boxes: list[list[float]], max_index: int) -> dict[int, list[float]]:
+	def match_boxes(self, prev_objs_map, objs) -> dict[int, list[float]]:
 		matching = {}
-		for box in boxes:
-			if len(box) == 0:
-				continue
+		for obj in objs:
 			threshold = 0.5
 			matched = -1
-			for i, prev_box in prev_boxes.items():
-				iou_val = self.iou(box, prev_box)
+			for prev_idx, prev_obj in prev_objs_map.items():
+				iou_val = self.iou(obj['bbox']['region'], prev_obj['bbox']['region'])
 				if iou_val >= threshold:
-					matched = i
+					matched = prev_idx
 					threshold = iou_val
 			if matched >=0:
-				matching[matched] = box
+				matching[matched] = obj
 			else:
-				matching[max_index] = box
-				max_index += 1
+				self.max_id += 1
+				matching[self.max_id] = obj
 		return matching
 	    
-	def track(self, id_trace: list[list[list[float]]]) -> list[dict[int, list[float]]]:
-		tracks = []
-		initial_objs = {}
-		idx = 0
-		for i in range(0, len(id_trace[0])):
-			if len(id_trace[0][i])>0:
-				initial_objs[idx] = id_trace[0][i]
-				idx+=1
-		max_index = idx-1
-		tracks.append(initial_objs)
-		for i in range(1, len(id_trace)):
-			tracks.append(self.match_boxes(tracks[i-1], id_trace[i],max_index))
-		return tracks
+	def track(self, obj_type, objs):
+		if obj_type not in self.obj_traces:
+			self.obj_traces[obj_type] = {}
+		track = self.obj_traces[obj_type]
+		if len(self.trace)-2 not in track:
+			track[len(self.trace)-1] = {}
+			for obj in objs:
+				self.max_id += 1
+				track[len(self.trace)-1][self.max_id] = obj
+			return
+		track[len(self.trace)-1] = self.match_boxes(track[len(self.trace)-2], objs)
 
-	def get_id_traces(self, trace: list[list[list[float]]]) -> dict[int, list[list[list[float]]]]:
-		id_traces: dict[int, list[list[list[float]]]] = {}
-		for box in trace[0]:
-			class_id = int(box[5])
-			if class_id not in id_traces:
-				id_traces[class_id] = [[]]
-			id_traces[class_id][0].append(box)
-		id_traces_new = {}
-		for class_id, id_trace in id_traces.items():
-			if len(id_trace[0]) >= 2:
-				id_traces_new[class_id] = id_trace
-		id_traces = id_traces_new
-		for i in range(1, len(trace)):
-			for box in trace[i]:
-				class_id = int(box[5])
-				if class_id in id_traces:
-					if i == len(id_traces[class_id]):
-						id_traces[class_id].append([[]])
-					id_traces[class_id][i].append(box)
-			to_del = set()
-			for class_id in id_traces.keys():
-				if len(id_traces[class_id]) < i+1 or len(id_traces[class_id][i]) < 2:
-					to_del.add(class_id)
-			for class_id in to_del:
-				del id_traces[class_id]
-		return id_traces
+	def get_type_bucket(self):
+		type_bucket = {}
+		for obj in self.trace[-1]:
+			obj_type = obj['class']
+			if obj_type not in type_bucket:
+				type_bucket[obj_type] = []
+			type_bucket[obj_type].append(obj)
+		return type_bucket
 	
-	def get_distance(self, box1: list[float], box2: list[float]) -> float:
-		x1 = (box1[0]+box1[2])/2
-		y1 = (box1[1]+box1[3])/2
-		x2 = (box2[0]+box2[2])/2
-		y2 = (box2[1]+box2[3])/2
+	def get_distance(self, obj1, obj2) -> float:
+		center1 = obj1['bbox']['region']['center']
+		center2 = obj2['bbox']['region']['center']
+		x1 = center1['x']
+		y1 = center1['y']
+		x2 = center2['x']
+		y2 = center2['y']
 		return (x1-x2)**2+(y1-y2)**2
 
-	def getting_closer(self, id_track:list[dict[int, list[float]]] , idx1: int, idx2: int) -> float:
-		init_distance = self.get_distance(id_track[0][idx1], id_track[0][idx2])
-		confidence = min(id_track[0][idx1][4], id_track[0][idx2][4])
-		for i in range(1, len(id_track)):
-			if idx1 not in id_track[i] or idx2 not in id_track[i]:
+	def getting_closer(self, track, fromm: int, to: int , idx1: int, idx2: int) -> float:
+		obj1 = track[fromm][idx1]
+		obj2 = track[fromm][idx2]
+		init_distance = self.get_distance(obj1, obj2)
+		confidence = min(obj1['score'], obj2['score'])
+		for i in range(fromm+1, to):
+			if i not in track:
 				return 0.0
-			distance = self.get_distance(id_track[i][idx1], id_track[i][idx2])
-			if init_distance*1.05 < distance or (i == len(id_track)-1 and init_distance*0.95 < distance):
+			if idx1 not in track[i] or idx2 not in track[i]:
 				return 0.0
-			confidence = min(confidence, id_track[i][idx1][4], id_track[i][idx2][4])
+			obj1 = track[fromm][idx1]
+			obj2 = track[fromm][idx2]
+			distance = self.get_distance(obj1, obj2)
+			if init_distance*1.05 < distance or (i == len(track)-1 and init_distance*0.95 < distance):
+				return 0.0
+			confidence = min(confidence, obj1['score'], obj2['score'])
 		return confidence
 	
-	def getting_further(self, id_track:list[dict[int, list[float]]] , idx1: int, idx2: int) -> float:
-		init_distance = self.get_distance(id_track[0][idx1], id_track[0][idx2])
-		confidence = min(id_track[0][idx1][4], id_track[0][idx2][4])
-		for i in range(1, len(id_track)):
-			if idx1 not in id_track[i] or idx2 not in id_track[i]:
+	def getting_further(self, track, fromm: int, to: int , idx1: int, idx2: int) -> float:
+		obj1 = track[fromm][idx1]
+		obj2 = track[fromm][idx2]
+		init_distance = self.get_distance(obj1, obj2)
+		confidence = min(obj1['score'], obj2['score'])
+		for i in range(fromm+1, to):
+			if i not in track:
 				return 0.0
-			distance = self.get_distance(id_track[i][idx1], id_track[i][idx2])
-			if init_distance*0.95 > distance or (i == len(id_track)-1 and init_distance*1.05 > distance):
+			if idx1 not in track[i] or idx2 not in track[i]:
 				return 0.0
-			confidence = min(confidence, id_track[i][idx1][4], id_track[i][idx2][4])
+			obj1 = track[fromm][idx1]
+			obj2 = track[fromm][idx2]
+			distance = self.get_distance(obj1, obj2)
+			if init_distance*0.95 > distance or (i == len(track)-1 and init_distance*1.05 > distance):
+				return 0.0
+			confidence = min(confidence, obj1['score'], obj2['score'])
 		return confidence
 			
-	def distance_direction(self, trace: list[list[list[float]]], is_closer: bool) -> float:
-		id_traces = self.get_id_traces(trace)
+	def distance_direction(self, fromm: int, to: int, is_closer: bool) -> float:
 		confidence = 0.0
-		for _, id_trace in id_traces.items():
-			id_track = self.track(id_trace)
-			objects = list(id_track[0].keys())
-			for i in range(len(objects)):
-				for j in range(i+1, len(objects)):
-					confidence = max(confidence, self.getting_closer(id_track, i, j) if is_closer else self.getting_further(id_track, i, j))
+		for _, track in self.obj_traces.items():
+			if fromm not in track:
+				continue
+			idxs = list(track[fromm].keys())
+			for i in range(len(idxs)):
+				for j in range(i+1, len(idxs)):
+					confidence = max(confidence, self.getting_closer(track, fromm, to, idxs[i], idxs[j]) if is_closer else self.getting_further(track, fromm, to, idxs[i], idxs[j]))
 		return confidence
+	
+	def add_frame(self, frame):
+		self.trace.append(frame)
+		type_bucket = self.get_type_bucket()
+		for obj_type, objs in type_bucket.items():
+			self.track(obj_type, objs)
 			
-	def compute(self, query_id: int, trace: list[list[list[float]]]) -> float:
-		return self.distance_direction(trace, self._queries[query_id] == "close")
+	def compute(self, query_id: int, fromm: int, to: int) -> float:
+		return self.distance_direction(fromm, to, self._queries[query_id] == "close")
 			

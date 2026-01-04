@@ -4,16 +4,17 @@ from prop_builder import PropBuilder
 from matcher import Matcher
 from oracle import ShapeExpressionOracle, VideoOracle
 import os
+import json
 
 def read_boxes(file_path:str) -> list[list[list[float]]]:
     trace = []
     f = open(file_path, 'r')
-    for line in f:
-        boxes = []
-        for box in line.split():
-            boxes.append([float(x) for x in box.split(',') if len(x)>0])
-            assert len(boxes[-1]) == 6
-        trace.append(boxes)
+    data = json.load(f)
+    trace = []
+    for frame in data['frames']:
+        for sample in frame['samples']:
+             if sample['channel'] == 'cam::front':
+                  trace.append(sample['annotations'])
     return trace
 
 parser = Lark(r"""
@@ -22,7 +23,7 @@ parser = Lark(r"""
               | start OR start
                     | start start
                    | start STAR
-              | start REFINE OPEN SIGNED_NUMBER COMMA SIGNED_NUMBER COMMA WORD (DASH (SIGNED_NUMBER | DOT))* CLOSE
+              | start REFINE OPEN SIGNED_NUMBER COMMA SIGNED_NUMBER COMMA NOTCLOSE CLOSE
 
     OR: "|"
     STAR: "*"
@@ -35,7 +36,8 @@ parser = Lark(r"""
     CLOSEBASE: "]"
     OPENPAR: "("
     CLOSEPAR: ")" 
-    DOT: "."    
+    DOT: "."
+    NOTCLOSE: /[^>][^>]*/
     
     %import common.SIGNED_NUMBER
     %import common.WORD
@@ -44,18 +46,26 @@ parser = Lark(r"""
 
     """, start='start')
 
+def match_videos(prop, query_map):
+    dir_path = '../lyft-dataset/processed'
+    for file_name in os.listdir(dir_path):
+            print(file_name)
+            file_path = os.path.join(dir_path, file_name)
+            trace = read_boxes(file_path)
+            print(len(trace))
+            matcher = Matcher(prop, VideoOracle(query_map))
+            for frame in trace:    
+                score = matcher.match(frame)
+                if score>0.0:
+                    print(file_name)
+                    print("Matched", score)
+                    exit()
+
 #parsed_tree = parser.parse("[1-1]*[10-361]^<1,361,l-0.1-.-.-0-.>[1-1]*")
 parsed_tree = parser.parse("[1-1]*[24-40]^<24,40,close>[24-40][24-40]^<24,40,far>")
 builder = PropBuilder(parsed_tree)
 prop, query_map = builder.build_prop()
+match_videos(prop, query_map)
 #print(parsed_tree.pretty())
 #f = open('418_C_BBB_101_9s_full.csv', 'r')
-dir_path = '../prep-charades'
-for file_name in os.listdir(dir_path):
-        file_path = os.path.join(dir_path, file_name)
-        trace = read_boxes(file_path)
-        matcher = Matcher(prop, VideoOracle(query_map), trace)
-        score = matcher.match()
-        if score>0.0:
-             print(file_name)
-             print("Matched", score)
+
