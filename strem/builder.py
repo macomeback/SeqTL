@@ -57,11 +57,7 @@ def build_term(tree) -> SpatialTerm:
             return Atom(first_token_val)
         if first_token_type == "VAR":
             return Var(first_token_val)
-        if first_token_type == "COMP":
-            return Complement(build_term(tree.children[2]))
-        if first_token_type == "INTERIOR":
-            return Interior(build_term(tree.children[2]))
-        return Closure(build_term(tree.children[2]))
+        return Complement(build_term(tree.children[2]))
     if tree.children[1].type == "UNION":
         return Union(build_term(tree.children[0]), build_term(tree.children[2]))
     return Intersection(build_term(tree.children[0]), build_term(tree.children[2]))

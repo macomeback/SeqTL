@@ -6,6 +6,7 @@ from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 from lark import Lark
 from strem.builder import build_formula
+from strem.evaluator import Evaluator
 
 strem_parser = Lark(r"""
     formula: ATOM
@@ -33,15 +34,11 @@ strem_parser = Lark(r"""
 		| COMP OPENPAR term CLOSEPAR
 		| term UNION term
 		| term INTERSECTION term
-		| INTERIOR OPENPAR term CLOSEPAR
-		| CLOSURE OPENPAR term CLOSEPAR
 		| OPENPAR term CLOSEPAR
 					
 
     UNION: "|"
 	INTERSECTION: "&"
-	INTERIOR: "[I]"
-	CLOSURE: "[C]"
 	COMP: "[comp]"
 	MINUS: "-"
 	SUM: "+"
@@ -301,7 +298,8 @@ class StremOracle:
 		self.trace.append(frame)
 
 	def match(self, formula, frame):
-
+		evaluator = Evaluator(frame)
+		evaluator.eval()
 
 	def compute(self, query_id: int, fromm: int, to: int) -> float:
 		if to-fromm !=1:
