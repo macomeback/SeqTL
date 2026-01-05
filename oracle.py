@@ -4,6 +4,72 @@ import numpy as np
 #from numpy.typing import NDArray, Shape
 from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
+from lark import Lark
+from strem.builder import build_formula
+
+strem_parser = Lark(r"""
+    formula: ATOM
+                   | EXISTS VAR OPENPAR ATOM CLOSEPAR formula
+              | EMP OPENPAR term CLOSEPAR
+                    | SUBSET OPENPAR term COMMA term CLOSEPAR
+                   | NOT formula
+              | formula AND formula
+			| formula OR formula
+			| LEQ OPENPAR exp COMMA exp CLOSEPAR
+			| OPENPAR formula CLOSEPAR
+					
+	exp: SIGNED_NUMBER
+					| X OPENPAR term CLOSEPAR
+					| Y OPENPAR term CLOSEPAR
+					| DIST OPENPAR term COMMA term CLOSEPAR
+					| MINUS exp
+					| exp SUM exp
+					| exp MUL exp
+					| exp EXP exp
+					| OPENPAR exp CLOSEPAR
+
+	term: ATOM
+		| VAR
+		| COMP OPENPAR term CLOSEPAR
+		| term UNION term
+		| term INTERSECTION term
+		| INTERIOR OPENPAR term CLOSEPAR
+		| CLOSURE OPENPAR term CLOSEPAR
+		| OPENPAR term CLOSEPAR
+					
+
+    UNION: "|"
+	INTERSECTION: "&"
+	INTERIOR: "[I]"
+	CLOSURE: "[C]"
+	COMP: "[comp]"
+	MINUS: "-"
+	SUM: "+"
+	MUL: "*"
+	EXP: "**"	
+	VAR: "_" WORD
+	SUBSET: "[subset]"
+	LEQ: "[leq]"				
+	AND: "/\"
+	OR: "\/"
+	NOT: "~"
+    ATOM: ":" WORD ":"
+    X: "[x]"
+	Y: "[y]"
+	DIST: "[dist]"
+	EXISTS: "[exists]"
+	EMPTY: "[emp]"
+    COMMA: ","
+    OPENPAR: "("
+    CLOSEPAR: ")" 
+    
+    %import common.SIGNED_NUMBER
+    %import common.WORD
+    %import common.WS
+    %ignore WS
+
+    """, start='formula')
+
 
 class RandomOracle:
 	def __init__(self, query_map: dict[str, int]):
@@ -73,6 +139,7 @@ class VideoOracle:
 	def __init__(self, query_map: dict[str, int]):
 		self._queries: list = [None]*len(query_map)
 		self._fill_queries(query_map)
+		self._cache = {}
 		self.trace = []
 		self.obj_traces = {}
 		self.max_id = -1
@@ -213,5 +280,36 @@ class VideoOracle:
 			self.track(obj_type, objs)
 			
 	def compute(self, query_id: int, fromm: int, to: int) -> float:
-		return self.distance_direction(fromm, to, self._queries[query_id] == "close")
+		if (query_id, fromm, to) in self._cache:
+			return self._cache[query_id, fromm, to]
+		output = self.distance_direction(fromm, to, self._queries[query_id] == "close")
+		self._cache[query_id, fromm, to] = output
+		return output
 			
+class StremOracle:
+	def __init__(self, query_map: dict[str, int]):
+		self._queries: list = [None]*len(query_map)
+		self._fill_queries(query_map)
+		self.trace = []
+		self._cache = {}
+
+	def _fill_queries(self, query_map):
+		for query_str, query_id in query_map.items():
+			self._queries[query_id] = build_formula(query_str)
+
+	def add_frame(self, frame):
+		self.trace.append(frame)
+
+	def match(self, formula, frame):
+
+
+	def compute(self, query_id: int, fromm: int, to: int) -> float:
+		if to-fromm !=1:
+			raise Exception("More than one frame queried")
+		if (query_id, fromm) in self._cache:
+			return self._cache[query_id, fromm]
+		formula = self._queries[query_id]
+		frame = self.trace[fromm]
+		output = self.match(formula, frame)
+		self._cache[query_id, fromm] = output
+		return output
