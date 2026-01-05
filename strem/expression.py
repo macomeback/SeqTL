@@ -1,4 +1,4 @@
-from term import SpatialTerm
+from strem.term import SpatialTerm
 
 class MetricExpression:
     pass

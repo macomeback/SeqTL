@@ -1,5 +1,5 @@
-from term import Atom, Var, SpatialTerm
-from expression import MetricExpression
+from strem.term import Atom, Var, SpatialTerm
+from strem.expression import MetricExpression
 
 class SpatialFormula:
     pass

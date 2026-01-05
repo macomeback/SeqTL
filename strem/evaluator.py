@@ -1,7 +1,8 @@
-from formula import *
-from term import *
-from expression import *
+from strem.formula import *
+from strem.term import *
+from strem.expression import *
 import shapely
+from shapely.geometry import Polygon
     
 def obj_to_box(obj):
         center = obj['region']['center']
@@ -30,7 +31,7 @@ class Evaluator:
         if formula_type == Exists:
             return self.eval_exists(formula)
         if formula_type == Empty:
-            return self.eval_term(formula.term).isempty
+            return self.eval_term(formula.term).is_empty
         if formula_type == Inclusion:
             return self.eval_inclusion(formula)
         if formula_type == Not:
@@ -64,15 +65,15 @@ class Evaluator:
         center2 = self.eval_term(exp.second)
         return shapely.distance(center1, center2)
         
-    def eval_inclusion(self, formula: Inclusion):
+    def eval_inclusion(self, formula: Inclusion) -> bool:
         left = self.eval(formula.left) 
         right = self.eval(formula.right)
-        return left.difference(right).isempty
+        return left.difference(right).is_empty()
         
     def eval_term(self, term: SpatialTerm):
         term_type = type(term)
         if term_type == Atom:
-            return self.eval_atom_boxes(term.name)
+            return self.eval_atom_boxes(term.obj_type)
         if term_type == Var:
             return obj_to_box(self._var_map[term.name])
         if term_type == Complement:
@@ -82,8 +83,8 @@ class Evaluator:
         return shapely.intersection(self.eval_term(term.left), self.eval_term(term.right))
         
     def eval_atom_boxes(self, name: str):
-        shape = shapely.empty()
-        for obj in self.frame['annotations']:
+        shape = Polygon()
+        for obj in self._frame['annotations']:
             if obj['class'] == name: 
                 shape = shapely.union(shape, obj_to_box(obj))
         return shape
@@ -92,7 +93,7 @@ class Evaluator:
         var_name = exists_formula.var.name
         obj_type = exists_formula.atom.obj_type
         child = exists_formula.child
-        for obj in self.frame:
+        for obj in self._frame:
             if obj['class'] == obj_type:
                 self._var_map[var_name] = obj
                 result = self.eval(child)
@@ -102,7 +103,7 @@ class Evaluator:
         return False
 
     def eval_atom(self, name: str) -> bool:
-        for obj in self.frame:
+        for obj in self._frame:
             if name == obj['class']:
                 return True
         return False

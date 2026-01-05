@@ -1,6 +1,6 @@
-from formula import *
-from expression import *
-from term import *
+from strem.formula import *
+from strem.expression import *
+from strem.term import *
 
 def build_formula(tree) -> SpatialFormula:
     if "Token" in str(type(tree.children[0])):
@@ -50,7 +50,7 @@ def build_exp(tree) -> MetricExpression:
 def build_term(tree) -> SpatialTerm:
     if "Token" in str(type(tree.children[0])):
         first_token_type = tree.children[0].type
-        first_token_val = tree.children[0].val
+        first_token_val = str(tree.children[0])
         if first_token_type == "OPENPAR":
             return build_term(tree.children[1])
         if first_token_type == "ATOM":

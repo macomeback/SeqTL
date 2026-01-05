@@ -48,15 +48,15 @@ strem_parser = Lark(r"""
 	VAR: "_" WORD
 	SUBSET: "[subset]"
 	LEQ: "[leq]"				
-	AND: "/\"
-	OR: "\/"
+	AND: "[and]"
+	OR: "[or]"
 	NOT: "~"
     ATOM: ":" WORD ":"
     X: "[x]"
 	Y: "[y]"
 	DIST: "[dist]"
 	EXISTS: "[exists]"
-	EMPTY: "[emp]"
+	EMP: "[emp]"
     COMMA: ","
     OPENPAR: "("
     CLOSEPAR: ")" 
@@ -250,7 +250,7 @@ class VideoOracle:
 		return confidence
 	
 	def add_frame(self, frame):
-		self.trace.append(frame)
+		self.trace.append(frame['annotations'])
 		type_bucket = self.get_type_bucket()
 		for obj_type, objs in type_bucket.items():
 			self.track(obj_type, objs)
@@ -261,7 +261,9 @@ class VideoOracle:
 		output = self.distance_direction(fromm, to, self._queries[query_id] == "close")
 		self._cache[query_id, fromm, to] = output
 		return output
-			
+
+# Unlike VideoOracle, frame here is a sample not just sample['annotations'] since
+# we need to know the sample image width and hight here.	
 class StremOracle:
 	def __init__(self, query_map: dict[str, int]):
 		self._queries: list = [None]*len(query_map)
@@ -271,14 +273,14 @@ class StremOracle:
 
 	def _fill_queries(self, query_map):
 		for query_str, query_id in query_map.items():
-			self._queries[query_id] = build_formula(query_str)
+			self._queries[query_id] = build_formula(strem_parser.parse(query_str))
 
 	def add_frame(self, frame):
 		self.trace.append(frame)
 
-	def match(self, formula, frame):
+	def match(self, formula, frame) -> bool:
 		evaluator = Evaluator(frame)
-		evaluator.eval(formula)
+		return evaluator.eval(formula)
 
 	def compute(self, query_id: int, fromm: int, to: int) -> float:
 		if to-fromm !=1:
@@ -287,6 +289,6 @@ class StremOracle:
 			return self._cache[query_id, fromm]
 		formula = self._queries[query_id]
 		frame = self.trace[fromm]
-		output = self.match(formula, frame)
+		output = 1.0 if self.match(formula, frame) else 0.0
 		self._cache[query_id, fromm] = output
 		return output
