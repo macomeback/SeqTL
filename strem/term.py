@@ -23,11 +23,3 @@ class Intersection(SpatialTerm):
     def __init__(self, left: SpatialTerm, right: SpatialTerm):
         self.right = right
         self.left = left
-
-class Interior(SpatialTerm):
-    def __init__(self, child: SpatialTerm):
-        self.child = child
-
-class Closure(SpatialTerm):
-    def __init__(self, child: SpatialTerm):
-        self.child = child

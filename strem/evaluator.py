@@ -1,81 +1,108 @@
 from formula import *
 from term import *
-
-class Box:
-    def __init__(self, x: float, y: float, w: float, h: float):
-        self.x = x
-        self.y = y
-        self.w = w
-        self.h = h
-
-    def intersect(self, box: "Box") -> "Box":
-        x_left = max(self.x-self.w/2, box.x-box.w/2)
-        x_right = min(self.x+self.w/2, box.x+box.w/2)
-        y_top = max(self.y-self.h/2, box.y-box.h/2)
-        y_bottom = min(self.y+self.h/2, box.y+box.h/2)
-        if x_right <= x_left or y_top >= y_bottom:
-            return None
-        center_x = (x_left+x_right)/2
-        center_y = (y_top+y_bottom)/2
-        return Box(center_x, center_y, x_right-x_left, y_bottom-y_top)
+from expression import *
+import shapely
     
-class BoxUnion:
-    def __init__(self, boxes: set[Box]):
-        self.boxes = boxes
-
-    def union(self, boxUnion: "BoxUnion") -> "BoxUnion":
-        union_boxes = set(self.boxes)
-        union_boxes.update(boxUnion.boxes)
-        return union_boxes
-    
-    def intersect(self, boxUnion: "BoxUnion") -> "BoxUnion":
-        intersection_boxes = set()
-        for box1 in self.boxes:
-            for box2 in boxUnion.boxes:
-                result = box1.intersect(box2)
-                if result is not None:
-                    intersection_boxes.add(result)
-        return intersection_boxes
+def obj_to_box(obj):
+        center = obj['region']['center']
+        dims = obj['region']['dimensions']
+        x = center['x']
+        y = center['y']
+        w = dims['w']
+        h = dims['h']
+        return shapely.box(x-w/2,y-h/2,x+w/2,y+h/2)
 
 class Evaluator:
     def __init__(self, frame):
         self._frame = frame
+        self._universe = self.build_universe(frame['image']['dimensions'])
         self._var_map = {}
 
-    def eval(self, formula: SpatialFormula) -> float:
+    def build_universe(self, dims):
+        w = dims['width']
+        h = dims['height']
+        return shapely.box(0, 0, w, h)
+
+    def eval(self, formula: SpatialFormula) -> bool:
         formula_type = type(formula)
         if formula_type == AtomFormula:
             return self.eval_atom(formula.atom.name)
         if formula_type == Exists:
             return self.eval_exists(formula)
         if formula_type == Empty:
-            return self.eval_empty(formula.term)
+            return self.eval_term(formula.term).isempty
+        if formula_type == Inclusion:
+            return self.eval_inclusion(formula)
+        if formula_type == Not:
+            return not self.eval(formula.child)
+        if formula_type == And:
+            return self.eval(formula.left) and self.eval(formula.right)
+        if formula_type == Or:
+            return self.eval(formula.left) or self.eval(formula.right)
+        return self.eval_exp(formula.left) <= self.eval_exp(formula.right)
+
+    def eval_exp(self, exp: MetricExpression) -> float:
+        exp_type = type(exp)
+        if exp_type == Constant:
+            return exp.val
+        if exp_type == CenterX:
+            return shapely.centroid(self.eval_term(exp.child)).x
+        if exp_type == CenterY:
+            return shapely.centroid(self.eval_term(exp.child)).y
+        if exp_type == Dist:
+            return self.eval_distance(exp)
+        if exp_type == Minus:
+            return -self.eval_exp(exp.child)
+        if exp_type == Sum:
+            return self.eval_exp(exp.left)+self.eval_exp(exp.right)
+        if exp_type == Mul:
+            return self.eval_exp(exp.left)*self.eval_exp(exp.right)
+        return self.eval_exp(exp.child)**exp.exponent
         
-    def eval_term(self, term: SpatialTerm) -> BoxUnion:
+    def eval_distance(self, exp: Dist):
+        center1 = self.eval_term(exp.first)
+        center2 = self.eval_term(exp.second)
+        return shapely.distance(center1, center2)
+        
+    def eval_inclusion(self, formula: Inclusion):
+        left = self.eval(formula.left) 
+        right = self.eval(formula.right)
+        return left.difference(right).isempty
+        
+    def eval_term(self, term: SpatialTerm):
         term_type = type(term)
         if term_type == Atom:
             return self.eval_atom_boxes(term.name)
         if term_type == Var:
-            self._var_map[term.name] 
-
+            return obj_to_box(self._var_map[term.name])
+        if term_type == Complement:
+            return self._universe.difference(self.eval_term(term.child))
+        if term_type == Union:
+            return shapely.union(self.eval_term(term.left), self.eval_term(term.right))
+        return shapely.intersection(self.eval_term(term.left), self.eval_term(term.right))
+        
     def eval_atom_boxes(self, name: str):
-        pass
+        shape = shapely.empty()
+        for obj in self.frame['annotations']:
+            if obj['class'] == name: 
+                shape = shapely.union(shape, obj_to_box(obj))
+        return shape
 
-    def eval_exists(self, exists_formula: Exists) -> float:
-        output = 0.0
+    def eval_exists(self, exists_formula: Exists) -> bool:
         var_name = exists_formula.var.name
         obj_type = exists_formula.atom.obj_type
         child = exists_formula.child
         for obj in self.frame:
             if obj['class'] == obj_type:
                 self._var_map[var_name] = obj
-                output = max(output, self.eval(child))
+                result = self.eval(child)
                 del self._var_map[var_name]
-        return output
+                if result == True:
+                    return True
+        return False
 
-    def eval_atom(self, name: str) -> float:
-        output = 0.0
+    def eval_atom(self, name: str) -> bool:
         for obj in self.frame:
             if name == obj['class']:
-                output = max(output , obj['score'])
-        return output
+                return True
+        return False

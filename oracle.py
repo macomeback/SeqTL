@@ -6,7 +6,8 @@ from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 from lark import Lark
 from strem.builder import build_formula
-from strem.evaluator import Evaluator
+from strem.evaluator import Evaluator, obj_to_box
+import shapely
 
 strem_parser = Lark(r"""
     formula: ATOM
@@ -132,6 +133,13 @@ class ShapeExpressionOracle:
 	def sin(self, t, a, b, c, d) -> float:
 		return a+b*np.sin(c*t+d)
 	
+def iou(shape1 , shape2) -> float:
+	intersection = shapely.intersection(shape1, shape2)
+	union = shapely.union(shape1, shape2)
+	if union.area > 0.0:
+		return intersection.area/union.area
+	return 0.0
+	
 class VideoOracle:
 	def __init__(self, query_map: dict[str, int]):
 		self._queries: list = [None]*len(query_map)
@@ -144,45 +152,16 @@ class VideoOracle:
 	def _fill_queries(self, query_map):
 		for query_str, query_id in query_map.items():
 			self._queries[query_id] = query_str
-			
-	def iou(self, box1, box2) -> float:
-		center1 = box1['center']
-		dim1 = box1['dimensions']
-		x1_left = center1['x']-dim1['w']/2
-		x1_right = center1['x']+dim1['w']/2
-		y1_top = center1['x']-dim1['h']/2
-		y1_bottom = center1['y']+dim1['h']/2
-		center2 = box2['center']
-		dim2 = box2['dimensions']
-		x2_left = center2['x']-dim2['w']/2
-		x2_right = center2['x']-dim2['w']/2
-		y2_top = center2['x']-dim2['h']/2
-		y2_bottom = center2['y']+dim2['h']/2
-		# Determine the coordinates of the intersection rectangle
-		x_left = max(x1_left, x2_left)
-		y_top = max(y1_top, y2_top)
-		x_right = min(x1_right, x2_right)
-		y_bottom = min(y1_bottom, y2_bottom)
-		# Compute the area of intersection rectangle
-		intersection_area = max(0, x_right - x_left) * max(0, y_bottom - y_top)
-		# Compute the area of both bounding boxes
-		boxA_area = dim1['w']*dim1['h']
-		boxB_area = dim2['w']*dim2['h']
-		# Compute the union area
-		union_area = boxA_area + boxB_area - intersection_area
-		# Compute the IoU, handling potential division by zero
-		if union_area == 0:
-			return 0.0
-		iou_val = intersection_area / float(union_area)
-		return iou_val
 	    
 	def match_boxes(self, prev_objs_map, objs) -> dict[int, list[float]]:
 		matching = {}
 		for obj in objs:
+			box = obj_to_box(obj)
 			threshold = 0.5
 			matched = -1
 			for prev_idx, prev_obj in prev_objs_map.items():
-				iou_val = self.iou(obj['bbox']['region'], prev_obj['bbox']['region'])
+				prev_box = obj_to_box(prev_obj)
+				iou_val = iou(box, prev_box)
 				if iou_val >= threshold:
 					matched = prev_idx
 					threshold = iou_val
@@ -299,7 +278,7 @@ class StremOracle:
 
 	def match(self, formula, frame):
 		evaluator = Evaluator(frame)
-		evaluator.eval()
+		evaluator.eval(formula)
 
 	def compute(self, query_id: int, fromm: int, to: int) -> float:
 		if to-fromm !=1:
