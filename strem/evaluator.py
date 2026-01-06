@@ -5,8 +5,8 @@ import shapely
 from shapely.geometry import Polygon
     
 def obj_to_box(obj):
-        center = obj['region']['center']
-        dims = obj['region']['dimensions']
+        center = obj['bbox']['region']['center']
+        dims = obj['bbox']['region']['dimensions']
         x = center['x']
         y = center['y']
         w = dims['w']

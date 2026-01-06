@@ -54,7 +54,7 @@ def build_term(tree) -> SpatialTerm:
         if first_token_type == "OPENPAR":
             return build_term(tree.children[1])
         if first_token_type == "ATOM":
-            return Atom(first_token_val)
+            return Atom(first_token_val[1:-1])
         if first_token_type == "VAR":
             return Var(first_token_val)
         return Complement(build_term(tree.children[2]))

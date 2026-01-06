@@ -66,6 +66,7 @@ def match_strem(prop, query_map):
     for file_name in os.listdir(dir_path):
             if 'sample' in file_name:
                  continue
+            print(file_name)
             file_path = os.path.join(dir_path, file_name)
             traces = read_boxes(file_path)
             matcher = Matcher(prop, StremOracle(query_map))
@@ -74,7 +75,7 @@ def match_strem(prop, query_map):
                 for frame in trace:    
                     score = matcher.match(frame)
                 if score:
-                    print("Match", channel, file_name)
+                    print("Match", channel)
 
 
 
