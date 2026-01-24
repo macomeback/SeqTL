@@ -5,6 +5,10 @@ from matcher import Matcher
 from oracle import ShapeExpressionOracle, VideoOracle, StremOracle
 import os
 import json
+import wfdb
+import numpy as np
+import pandas as pd
+import ast
 
 def read_boxes(file_path:str):
     f = open(file_path, 'r')
@@ -46,6 +50,23 @@ parser = Lark(r"""
 
     """, start='start')
 
+def load_raw_ecg_data(df, sampling_rate, path):
+    if sampling_rate == 100:
+        data = [wfdb.rdsamp(path+f) for f in df.filename_lr]
+    else:
+        data = [wfdb.rdsamp(path+f) for f in df.filename_hr]
+    data = np.array([signal for signal, meta in data])
+    return data
+
+def load_ecg_data(sampling_rate = 100):
+    path = '../PTB-XL/ptb-xl/'
+    # load and convert annotation data
+    Y = pd.read_csv(path+'ptbxl_database.csv', index_col='ecg_id')
+    Y.scp_codes = Y.scp_codes.apply(lambda x: ast.literal_eval(x))
+    # Load raw signal data
+    X = load_raw_ecg_data(Y, sampling_rate, path)
+    return X, Y
+
 def match_videos(prop, query_map):
     dir_path = '../lyft-dataset/processed'
     for file_name in os.listdir(dir_path):
@@ -77,14 +98,27 @@ def match_strem(prop, query_map):
                 if score:
                     print("Match", channel)
 
+def match_shapexp(prop, query_map):
+     X, Y = load_ecg_data()
+     trace = X[0, :, 11]
+     i = 0
+     matcher = Matcher(prop, ShapeExpressionOracle(query_map, 0.02))
+     for frame in trace:
+        score = matcher.match(frame)
+        i += 1
+     
 
 
 #parsed_tree = parser.parse("[1-1]*[10-361]^<1,361,l-0.1-.-.-0-.>[1-1]*")
 #parsed_tree = parser.parse("[1-1]*[24-40]^<24,40,close>[24-40][24-40]^<24,40,far>")
-parsed_tree = parser.parse("[1-1]*[1-1]^<1,1,~[emp](:pedestrian:&:bicycle:)>[1-1]*")
+#parsed_tree = parser.parse("[1-1]*[1-1]^<1,1,~[emp](:pedestrian:&:bicycle:)>[1-1]*")
+
+parsed_tree = parser.parse("[1-1]*[1-1]*^<3,1000,e_inf_inf_0_inf_inf_inf>[1-1]*^<3,1000,e_inf_inf_inf_0_inf_inf>[1-1]*^<3,1000,l_0_inf_inf_inf>[1-1]*^<3,1000,l_0_inf_inf_inf>[1-1]*^<3,1000,l_inf_0_inf_inf>[1-1]*^<3,1000,e_inf_inf_0_inf_inf_inf>[1-1]*^<3,1000,e_inf_inf_inf_0_inf_inf>[1-1]*")
 builder = PropBuilder(parsed_tree)
 prop, query_map = builder.build_prop()
-match_strem(prop, query_map)
+match_shapexp(prop, query_map)
+
+#match_strem(prop, query_map)
 #print(parsed_tree.pretty())
 #f = open('418_C_BBB_101_9s_full.csv', 'r')
 

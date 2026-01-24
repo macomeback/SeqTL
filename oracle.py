@@ -2,12 +2,11 @@ import random
 import numpy as np
 #import torch
 #from numpy.typing import NDArray, Shape
-from scipy.optimize import curve_fit
-from sklearn.metrics import r2_score
 from lark import Lark
 from strem.builder import build_formula
 from strem.evaluator import Evaluator, obj_to_box
 import shapely
+from lmfit import Model, Parameters
 
 strem_parser = Lark(r"""
     formula: ATOM
@@ -81,56 +80,71 @@ class RandomOracle:
 		return response
 	
 class ShapeExpressionOracle:
-	def __init__(self, query_map: dict[str, int]):
+	def __init__(self, query_map: dict[str, int], noise_tolerance: float):
 		self._queries: list = [None]*len(query_map)
+		self._tolerance = noise_tolerance
 		self._fill_queries(query_map)
-		self._current_x = []
+		self._cache = {}
+		self._current_x = np.zeros(0, dtype=int)
+		self.trace = np.zeros(0, dtype=float)
 
 	def _fill_queries(self, query_map):
 		func_map = {"s": self.sin, "e": self.exp, "l": self.lin}
 		for query_str, query_id in query_map.items():
 			lb_list = []
 			ub_list = []
-			parts = query_str.split("-")
+			parts = query_str.split("_")
 			func = func_map[parts[0]]
-			mse = float(parts[1])
-			for i in range(2, len(parts)):
-				if parts[i] == '.':
-					if i %2 == 0:
+			for i in range(1, len(parts)):
+				if parts[i] == 'inf':
+					if i %2 == 1:
 						lb_list.append(-np.inf)
 					else:
 						ub_list.append(np.inf)
-				elif i % 2 == 0:
+				elif i % 2 == 1:
 					lb_list.append(float(parts[i]))
 				else:
 					ub_list.append(float(parts[i]))
-			self._queries[query_id] = (func, mse, lb_list, ub_list)
+			if query_str == "e":
+				ub_list[2] = min(ub_list[2], 700)
+			self._queries[query_id] = (func, lb_list, ub_list)
 
-	def compute(self, query_id: int, trace: list[object]) -> float:
-		for i in range(len(self._current_x), len(trace)):
-			self._current_x.append(i)
-		return self.atomic_match(trace, *self._queries[query_id])
+	def compute(self, query_id: int, fromm: int, to: int) -> bool:
+		if (fromm, to) in self._cache:
+			return self._cache[fromm, to]
+		result = self.atomic_match(self.trace[fromm: to], *self._queries[query_id])
+		self._cache[query_id, fromm, to] = result
+		return result
+	
+	def atomic_match(self, trace, shape, lb_list, ub_list) -> bool:
+		min_trace = trace.min()
+		scale = trace.max()-min_trace
+		if scale > 0.0:
+			normalized_trace = (trace-min_trace)/scale
+		else:
+			normalized_trace = trace
+		param_names = ['a','b','c','d']
+		model = Model(shape, independent_vars=['t'])
+		params = model.make_params()
+		for i in range(len(lb_list)):
+			if lb_list[i] != np.inf and lb_list[i] != -np.inf:
+				params[param_names[i]].set(min=lb_list[i])
+			if ub_list[i] != np.inf and ub_list[i] != -np.inf:
+				params[param_names[i]].set(min=ub_list[i])
+		result = model.fit(normalized_trace, t=self._current_x[:len(trace)])
+		return result.summary()['rsquared'] >= .98
+	
+	def add_frame(self, frame):
+		self.trace = np.append(self.trace, [frame])
+		self._current_x = np.append(self._current_x, [len(self.trace)-1])
 
-	def atomic_match(self, trace, shape, condition, lb_list, ub_list) -> float:
-		try:
-			popt, pcov = curve_fit(f = shape, xdata = self._current_x[:len(trace)], ydata=trace, bounds=(lb_list,ub_list), method='dogbox')
-			y_pred = shape(np.array(self._current_x[:len(trace)]), *popt)
-			r2 = r2_score(trace, y_pred)
-			return max(0.0,1-(1-r2)/condition)
-		except RuntimeError as e:
-			i = str(e).find("maximum number of function evaluations")
-			print("error",i)
-			if "maximum number of function evaluations" in str(e):
-				return 0.0
-		return 0.0
-
-	def lin(self, t, a, b):
+	def lin(self, t, a=0, b=0):
 		return a*t+b
 	
-	def exp(self, t, a, b, c) -> float:
+	def exp(self, t, a=0, b=0, c=0) -> float:
 		return a+b*np.exp(c*t)
 	
-	def sin(self, t, a, b, c, d) -> float:
+	def sin(self, t, a=0, b=0, c=0, d=0) -> float:
 		return a+b*np.sin(c*t+d)
 	
 def iou(shape1 , shape2) -> float:
@@ -292,3 +306,14 @@ class StremOracle:
 		output = 1.0 if self.match(formula, frame) else 0.0
 		self._cache[query_id, fromm] = output
 		return output
+	
+#try:
+		# 	popt, pcov = curve_fit(f = shape, xdata = self._current_x[:len(trace)], ydata=trace, bounds=(lb_list,ub_list), method='dogbox')
+		# 	y_pred = shape(self._current_x[:len(trace)], *popt)
+		# 	r2 = r2_score(trace, y_pred)
+		# 	return r2 > 1-self._tolerance
+		# except RuntimeError as e:
+		# 	i = str(e).find("maximum number of function evaluations")
+		# 	print("error",i)
+		# 	if "maximum number of function evaluations" in str(e):
+		# 		return False

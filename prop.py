@@ -6,6 +6,9 @@ class LengthProp(SeqTLProp):
 	def __init__(self, lb: int, ub: int):
 		self.lb = lb
 		self.ub = ub
+
+	def __str__(self):
+		return "["+str(self.lb)+","+str(self.ub)+"]"
 		
 class UnionProp(SeqTLProp):
 	
@@ -13,16 +16,25 @@ class UnionProp(SeqTLProp):
 		self.left = prop1
 		self.right = prop2
 
+	def __str__(self):
+		return "("+self.left.__str__()+"+"+self.right.__str__()+")"
+
 class ConcatProp(SeqTLProp):
 	
 	def __init__(self, prop1: SeqTLProp, prop2: SeqTLProp):
 		self.left = prop1
 		self.right = prop2
+
+	def __str__(self):
+		return self.left.__str__()+self.right.__str__()
 		
 class StarProp(SeqTLProp):
 	
 	def __init__(self, prop: SeqTLProp):
 		self.child = prop
+
+	def __str__(self):
+		return "("+self.child.__str__()+")*"
 		
 class RefineProp(SeqTLProp):
 
@@ -30,7 +42,10 @@ class RefineProp(SeqTLProp):
 		self.child = prop
 		self.query_id = query_id
 		self.lb = lb
-		self.ub = ub	
+		self.ub = ub
+
+	def __str__(self):
+		return "("+self.child.__str__()+")^<"+str(self.lb)+","+str(self.ub)+","+str(self.query_id)+">"
 
 
 	

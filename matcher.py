@@ -1,135 +1,170 @@
 from prop import *
-from typing import Tuple, Optional
 
 class Matcher:
 	def __init__(self, prop: SeqTLProp, oracle):
 		self._prop = prop
 		self.oracle = oracle
-		self._trace = []
-		self._query_cache: dict[Tuple[int,int,int], float] = {}
-		self._query_dnf_cache: dict[Tuple[SeqTLProp,int], Optional[set[set[Tuple[int,int,int]]]]] = {}
+		self.counter = 0
+		self._cache = {}
+		self._refine_frees = set()
+		self.add_largest_refine_free_parts(self._prop)
+		self._epsilon_accepting = set()
+		for prop in self._refine_frees:
+			self.add_epsilon_accepting(prop)
 
-	def _get_query_dnf(self, prop: SeqTLProp, length: int) -> Optional[set[set[Tuple[int,int,int]]]]:
-		if (prop, length) in self._query_dnf_cache:
-			return self._query_dnf_cache[prop, length]
-		if isinstance(prop, LengthProp):
-			if length >= prop.lb and length <= prop.ub:
-				return self._cache_query_pair(prop, length, set())
-			return self._cache_query_pair(prop, length, None)
-		if isinstance(prop, UnionProp):
-			return self._get_union_query_dnf(prop, length)
-		if isinstance(prop, ConcatProp):
-			return self._get_concat_query_dnf(prop, length)
-		if isinstance(prop, StarProp):
-			return self._get_star_query_dnf(prop, length)
-		if isinstance(prop, RefineProp):
-			return self._get_refine_query_dnf(prop, length)
-		
-	def _get_refine_query_dnf(self, prop: RefineProp, length: int):
-		if length < prop.lb or length > prop.ub:
-			return self._cache_query_pair(prop, length, None)
-		child_dnf = self._get_query_dnf(prop.child, length)
-		if child_dnf is not None:
-			dnf = set()
-			if len(child_dnf) == 0:
-				dnf.add(frozenset({(prop.query_id, 0, length)}))
-			else:
-				for child_clause in child_dnf:
-					clause = set()
-					clause.update(child_clause)
-					clause.add((prop.query_id, 0, length))
-					dnf.add(clause)
-			return self._cache_query_pair(prop, length, dnf)
-		return self._cache_query_pair(prop, length, None)
-		
-	def _conjunct_query_dnfs(self, idx: int, output_dnf:set[set[Tuple[int,int,int]]], dnf_left: set[set[Tuple[int,int,int]]], dnf_right: set[set[Tuple[int,int,int]]]):
-		if len(dnf_left) == 0:
-			for clause_right in dnf_right:
-					output_dnf.add(frozenset(self.shift_clause_index(idx, clause_right)))
-			return
-		if len(dnf_right) == 0:
-			output_dnf.update(dnf_left)
-			return
-		for clause_left in dnf_left:
-				for clause_right in dnf_right:
-					dnf_clause = self.shift_clause_index(idx, clause_right)
-					dnf_clause.update(clause_left)
-					output_dnf.add(frozenset(dnf_clause))
+	def add_epsilon_accepting(self, prop: SeqTLProp):
+		if type(prop) == StarProp:
+			self.add_epsilon_accepting(prop.child)
+			self._epsilon_accepting.add(prop)
+		elif type(prop) == LengthProp and prop.lb == 0:
+			self._epsilon_accepting.add(prop)
+		elif type(prop) == UnionProp:
+			self.add_epsilon_accepting(prop.left)
+			self.add_epsilon_accepting(prop.right)
+			if prop.left in self._epsilon_accepting or prop.right in self._epsilon_accepting:
+				self._epsilon_accepting.add(prop)
+		elif type(prop) == ConcatProp:
+			self.add_epsilon_accepting(prop.left)
+			self.add_epsilon_accepting(prop.right)
+			if prop.left in self._epsilon_accepting and prop.right in self._epsilon_accepting:
+				self._epsilon_accepting.add(prop)
 
-	def shift_clause_index(self, idx: int, to_shift_clause: set[Tuple[int,int,int]]) -> set[Tuple[int,int,int]]:
-		dnf_clause = set()
-		for pair in to_shift_clause:
-			dnf_clause.add((pair[0], pair[1]+idx, pair[2]+idx))
-		return dnf_clause
+	def add_largest_refine_free_parts(self, prop: SeqTLProp):
+		if type(prop) == LengthProp:
+			return True
+		if type(prop) == RefineProp:
+			_ = self.add_largest_refine_free_parts(prop.child)
+			return False
+		if type(prop) == StarProp:
+			result = self.add_largest_refine_free_parts(prop.child)
+			if result:
+				self._refine_frees.discard(prop.child)
+				self._refine_frees.add(prop)
+			return result
+		if type(prop) in [UnionProp, ConcatProp]:
+			first = self.add_largest_refine_free_parts(prop.left)
+			last = self.add_largest_refine_free_parts(prop.right)
+			result = first and last
+			if result:
+				self._refine_frees.discard(first)
+				self._refine_frees.discard(last)
+				self._refine_frees.add(prop)
+			return result
 		
-	def _get_star_query_dnf(self, prop: SeqTLProp, length: int) -> Optional[set[set[Tuple[int,int,int]]]]:
-		if length == 0:
-			return self._cache_query_pair(prop, length, set())
-		output_dnf = set()
-		valid_match = False
-		for i in range(1, length+1):
-			dnf_left = self._get_query_dnf(prop.child, i)
-			if dnf_left is None:
-				continue
-			dnf_right = self._get_query_dnf(prop, length-i)
-			if dnf_right is None:
-				continue
-			valid_match = True
-			self._conjunct_query_dnfs(i,output_dnf, dnf_left, dnf_right)
-		if not valid_match:
-			return self._cache_query_pair(prop, length, None)
-		return self._cache_query_pair(prop, length, output_dnf)
-		
-	def _get_concat_query_dnf(self, prop: SeqTLProp, length: int) -> Optional[set[set[Tuple[int,int,int]]]]:
-		output_dnf = set()
-		valid_match = False
-		for i in range(0, length+1):
-			dnf_left = self._get_query_dnf(prop.left, i)
-			if dnf_left is None:
-				continue
-			dnf_right = self._get_query_dnf(prop.right, length-i)
-			if dnf_right is None:
-				continue
-			valid_match = True
-			self._conjunct_query_dnfs(i,output_dnf, dnf_left, dnf_right)
-		if not valid_match:
-			return self._cache_query_pair(prop, length, None)
-		return self._cache_query_pair(prop, length, output_dnf)
-		
-		
-	def _get_union_query_dnf(self, prop: SeqTLProp, length: int) -> Optional[set[set[Tuple[int,int,int]]]]:
-		dnf_left = self._get_query_dnf(prop.left, length)
-		dnf_right = self._get_query_dnf(prop.right, length)
-		if dnf_left is None:
-			if dnf_right is None:
-				return self._cache_query_pair(prop, length, None)
-			return self._cache_query_pair(prop, length, dnf_right)
-		if dnf_right is None:
-			return self._cache_query_pair(prop, length, dnf_left)
-		return self._cache_query_pair(prop, length, dnf_left.union(dnf_right))
+	def norefine_update(self, prop: SeqTLProp):
+		if type(prop) == LengthProp:
+			self.length_norefine_update(prop)
+		elif type(prop) == UnionProp:
+			self.union_norefine_update(prop)
+		elif type(prop) == ConcatProp:
+			self.concat_norefine_update(prop)
+		elif type(prop) == StarProp:
+			self.star_norefine_prop(prop)
 
-	def _cache_query_pair(self, prop: SeqTLProp, length: int, value: Optional[set[set[Tuple[int,int,int]]]]) -> Optional[set[set[Tuple[int,int,int]]]]:
-		self._query_dnf_cache[prop, length] = value
-		return value
-	
-	def evaluate(self, query_dnf: set[set[Tuple[int,int,int]]]):
+	def star_norefine_prop(self, prop: StarProp):
+		self.norefine_update(prop.child)
+		trace_length = len(self.oracle.trace)
+		for i in range(trace_length-1, -1, -1):
+			result = 0.0
+			for mid in range(i+1, trace_length+1):
+				left_val = self._cache[prop.child, i, mid]
+				right_val = self._cache[prop, mid, trace_length] if mid < trace_length else 1.0
+				result = max(result, min(left_val, right_val))
+			self._cache[prop, i, trace_length] = result
+
+	def union_norefine_update(self, prop: UnionProp):
+		self.norefine_update(prop.left)
+		self.norefine_update(prop.right)
+		trace_length = len(self.oracle.trace)
+		for i in range(trace_length):
+			self._cache[prop, i, trace_length] = max(self._cache[prop.left, i, trace_length], self._cache[prop.right, i, trace_length])
+
+	def concat_norefine_update(self, prop: ConcatProp):
+		self.norefine_update(prop.left)
+		self.norefine_update(prop.right)
+		trace_length = len(self.oracle.trace)
+		for i in range(trace_length-1, -1, -1):
+			result = 0.0
+			for mid in range(i, trace_length+1):
+				left_val = self._cache[prop.left, i, mid] if i < mid else prop.left in self._epsilon_accepting
+				right_val = self._cache[prop.right, mid, trace_length] if mid < trace_length else prop.right in self._epsilon_accepting
+				result = max(result, min(left_val, right_val))
+			self._cache[prop, i, trace_length] = result
+			
+	def length_norefine_update(self, prop: LengthProp):
+		trace_length = len(self.oracle.trace)
+		for i in range(trace_length):
+			length = len(self.oracle.trace)-i
+			self._cache[prop, i, trace_length] = length >= prop.lb and length <= prop.ub
+
+	def evaluate(self, prop: SeqTLProp, fromm: int, to: int): # fromm inclusive, to exclusive
+		if (prop, fromm, to) in self._cache:
+			return self._cache[prop, fromm, to]
+		if type(prop) == LengthProp:
+			length = to-fromm
+			return length >= prop.lb and length <= prop.ub
+		if type(prop) == UnionProp:
+			return self.eval_union(prop, fromm, to)
+		if type(prop) == ConcatProp:
+			return self.eval_concat(prop, fromm, to)
+		if type(prop) == StarProp:
+			return self.eval_star(prop, fromm, to)
+		if type(prop) == RefineProp:
+			return self.eval_refine(prop, fromm, to)
+		
+	def eval_refine(self, prop: RefineProp, fromm: int, to: int):
+		length = to-fromm
+		if length > prop.ub or prop.lb > length:
+			return 0.0
+		child_val = self.evaluate(prop.child, fromm, to)
+		if child_val == 0.0:
+			self._cache[prop, fromm, to] = 0.0
+			return 0.0
+		result = min(self.oracle.compute(prop.query_id, fromm, to), child_val)
+		self._cache[prop, fromm, to] = result
+		return result
+		
+	def eval_star(self, prop: StarProp, fromm: int, to: int):
+		if to == fromm:
+			return 1.0
 		output = 0.0
-		for clause in query_dnf:
-			clause_val = 1
-			for pair in clause:
-				if pair not in self._query_cache:
-					self._query_cache[pair] = self.oracle.compute(pair[0], pair[1], pair[2])
-				clause_val = min(clause_val,self._query_cache[pair])
-				if clause_val == 0.0:
-					break
-			output = max(output, clause_val)
+		for mid in range(fromm+1, to+1):
+			child_val = self.evaluate(prop.child, fromm, mid)
+			if child_val <= output:
+				continue
+			recursive_val = self.evaluate(prop, mid, to)
+			output = max(min(child_val, recursive_val), output)
 			if output == 1.0:
-				return output
+				break
+		self._cache[prop, fromm, to] = output
 		return output
 
-	def match(self, frame) -> float:
+	def eval_concat(self, prop: ConcatProp, fromm: int, to: int):
+		output = 0
+		for mid in range(fromm, to+1):
+			left_val = self.evaluate(prop.left, fromm, mid)
+			if left_val <= output:
+				continue
+			right_val = self.evaluate(prop.right, mid, to)
+			output = max(min(right_val, left_val), output)
+			if output == 1.0:
+				break
+		self._cache[prop, fromm, to] = output
+		return output
+
+	def eval_union(self, prop: UnionProp, fromm: int, to: int):
+		first_val = self.evaluate(prop.left, fromm, to)
+		if first_val == 1.0:
+			self._cache[prop, fromm, to] = 1.0
+			return 1.0
+		second_val = self.evaluate(prop.right, fromm, to)
+		val = max(first_val, second_val)
+		self._cache[prop, fromm, to] = val
+		return val
+
+	def match(self, frame):
 		self.oracle.add_frame(frame)
-		query_dnf = self._get_query_dnf(self._prop, len(self.oracle.trace))
-		if query_dnf is None:
-			return 0.0
-		return self.evaluate(query_dnf)
+		print(len(self.oracle.trace))
+		for prop in self._refine_frees:
+			self.norefine_update(prop)
+		return self.evaluate(self._prop, 0, len(self.oracle.trace))
