@@ -160,44 +160,13 @@ class VideoOracle:
 		self._fill_queries(query_map)
 		self._cache = {}
 		self.trace = []
-		self.obj_traces = {}
-		self.max_id = -1
+		self.type_buckets = []
+		self.query_count = 0
 
 	def _fill_queries(self, query_map):
 		for query_str, query_id in query_map.items():
-			self._queries[query_id] = query_str
-	    
-	def match_boxes(self, prev_objs_map, objs) -> dict[int, list[float]]:
-		matching = {}
-		for obj in objs:
-			box = obj_to_box(obj)
-			threshold = 0.5
-			matched = -1
-			for prev_idx, prev_obj in prev_objs_map.items():
-				prev_box = obj_to_box(prev_obj)
-				iou_val = iou(box, prev_box)
-				if iou_val >= threshold:
-					matched = prev_idx
-					threshold = iou_val
-			if matched >=0:
-				matching[matched] = obj
-			else:
-				self.max_id += 1
-				matching[self.max_id] = obj
-		return matching
-	    
-	def track(self, obj_type, objs):
-		if obj_type not in self.obj_traces:
-			self.obj_traces[obj_type] = {}
-		track = self.obj_traces[obj_type]
-		if len(self.trace)-2 not in track:
-			track[len(self.trace)-1] = {}
-			for obj in objs:
-				self.max_id += 1
-				track[len(self.trace)-1][self.max_id] = obj
-			return
-		track[len(self.trace)-1] = self.match_boxes(track[len(self.trace)-2], objs)
-
+			self._queries[query_id] = query_str.split("_")
+	
 	def get_type_bucket(self):
 		type_bucket = {}
 		for obj in self.trace[-1]:
@@ -216,63 +185,87 @@ class VideoOracle:
 		y2 = center2['y']
 		return (x1-x2)**2+(y1-y2)**2
 
-	def getting_closer(self, track, fromm: int, to: int , idx1: int, idx2: int) -> float:
-		obj1 = track[fromm][idx1]
-		obj2 = track[fromm][idx2]
-		init_distance = self.get_distance(obj1, obj2)
-		confidence = min(obj1['score'], obj2['score'])
-		for i in range(fromm+1, to):
-			if i not in track:
+	def getting_closer(self, fromm: int, to: int, type1, type2) -> float:
+		last_dist = -1
+		min_score = -1
+		init_dist = -1
+		for i in range(fromm, to):
+			if type1 not in self.type_buckets[i] or type2 not in self.type_buckets[i]:
 				return 0.0
-			if idx1 not in track[i] or idx2 not in track[i]:
+			bucket1 = self.type_buckets[i][type1]
+			bucket2 = self.type_buckets[i][type2]
+			if type1==type2 and (len(bucket1)==1 or len(bucket2)==1):
 				return 0.0
-			obj1 = track[fromm][idx1]
-			obj2 = track[fromm][idx2]
-			distance = self.get_distance(obj1, obj2)
-			if init_distance*1.05 < distance or (i == len(track)-1 and init_distance*0.95 < distance):
+			dist, score = self.get_min_dist(bucket1, bucket2)
+			if i == fromm:
+				last_dist = dist
+				init_dist = dist
+				min_score = score
+			elif last_dist > 1.05*dist:
 				return 0.0
-			confidence = min(confidence, obj1['score'], obj2['score'])
-		return confidence
+			else:
+				last_dist = dist
+				min_score = min(score, min_score)
+		if init_dist*0.95>last_dist:
+			return min_score
+		return 0.0
 	
-	def getting_further(self, track, fromm: int, to: int , idx1: int, idx2: int) -> float:
-		obj1 = track[fromm][idx1]
-		obj2 = track[fromm][idx2]
-		init_distance = self.get_distance(obj1, obj2)
-		confidence = min(obj1['score'], obj2['score'])
-		for i in range(fromm+1, to):
-			if i not in track:
+	
+	def get_min_dist(self, bucket1, bucket2):
+		min_dist = -1
+		score = -1
+		for i in range(len(bucket1)):
+			for j in range(len(bucket2)):
+				if bucket1[i] != bucket2[j]:
+					dist = self.get_distance(bucket1[i], bucket2[j])
+					ij_score = min(bucket1[i]['score'], bucket2[j]['score'])
+					if min_dist<0:
+						min_dist = dist
+						score = ij_score
+					else:
+						min_dist = min(min_dist, dist)
+						score = min(score, ij_score)
+		return min_dist, score
+
+	
+	def getting_further(self, fromm: int, to: int, type1, type2) -> float:
+		last_dist = -1
+		min_score = -1
+		init_dist = -1
+		for i in range(fromm, to+1):
+			if type1 not in self.type_buckets[i] or type2 not in self.type_buckets[i]:
 				return 0.0
-			if idx1 not in track[i] or idx2 not in track[i]:
+			bucket1 = self.type_buckets[i][type1]
+			bucket2 = self.type_buckets[i][type2]
+			if type1==type2 and (len(bucket1)==1 or len(bucket2)==1):
 				return 0.0
-			obj1 = track[fromm][idx1]
-			obj2 = track[fromm][idx2]
-			distance = self.get_distance(obj1, obj2)
-			if init_distance*0.95 > distance or (i == len(track)-1 and init_distance*1.05 > distance):
+			dist, score = self.get_min_dist(bucket1, bucket2)
+			if i == fromm:
+				last_dist = dist
+				init_dist = dist
+				min_score = score
+			elif last_dist < 0.95*dist:
 				return 0.0
-			confidence = min(confidence, obj1['score'], obj2['score'])
-		return confidence
+			else:
+				last_dist = dist
+				min_score = min(score, min_score)
+		if init_dist*1.05<last_dist:
+			return min_score
+		return 0.0
 			
-	def distance_direction(self, fromm: int, to: int, is_closer: bool) -> float:
-		confidence = 0.0
-		for _, track in self.obj_traces.items():
-			if fromm not in track:
-				continue
-			idxs = list(track[fromm].keys())
-			for i in range(len(idxs)):
-				for j in range(i+1, len(idxs)):
-					confidence = max(confidence, self.getting_closer(track, fromm, to, idxs[i], idxs[j]) if is_closer else self.getting_further(track, fromm, to, idxs[i], idxs[j]))
-		return confidence
-	
 	def add_frame(self, frame):
 		self.trace.append(frame['annotations'])
-		type_bucket = self.get_type_bucket()
-		for obj_type, objs in type_bucket.items():
-			self.track(obj_type, objs)
+		self.type_buckets.append(self.get_type_bucket())
 			
 	def compute(self, query_id: int, fromm: int, to: int) -> float:
 		if (query_id, fromm, to) in self._cache:
 			return self._cache[query_id, fromm, to]
-		output = self.distance_direction(fromm, to, self._queries[query_id] == "close")
+		self.query_count += 1
+		query_parts = self._queries[query_id]
+		if "close" == query_parts[2]:
+			output = self.getting_closer(fromm, to, query_parts[0], query_parts[1])
+		else:
+			output = self.getting_further(fromm, to, query_parts[0], query_parts[1])
 		self._cache[query_id, fromm, to] = output
 		return output
 

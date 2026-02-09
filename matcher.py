@@ -164,7 +164,6 @@ class Matcher:
 
 	def match(self, frame):
 		self.oracle.add_frame(frame)
-		print(len(self.oracle.trace))
 		for prop in self._refine_frees:
 			self.norefine_update(prop)
 		return self.evaluate(self._prop, 0, len(self.oracle.trace))
