@@ -11,6 +11,7 @@ import pandas as pd
 import ast
 import argparse
 import time
+import matplotlib.pyplot as plt
 
 def read_boxes(file_path:str):
     f = open(file_path, 'r')
@@ -71,12 +72,13 @@ def load_ecg_data(sampling_rate = 100):
 
 def match_moving(prop, query_map):
     dir_path = '../lyft-dataset/processed'
-    print("File", "Channel", "Score", "Query Count", "Time")
+    print("File", "Channel", "Score", "QueryCount", "Time", sep=',')        
     for file_name in os.listdir(dir_path):
             if 'sample' in file_name:
                  continue
             file_path = os.path.join(dir_path, file_name)
-            traces = read_boxes(file_path)
+            traces, labels = read_boxes(file_path)
+            labels_set = labels_set.union(labels)
             for channel, trace in traces.items():
                 start_time = time.perf_counter()
                 now_oracle = VideoOracle(query_map)
@@ -85,38 +87,60 @@ def match_moving(prop, query_map):
                 for frame in trace:    
                     score = matcher.match(frame)
                 end_time = time.perf_counter()
-                print(file_name, channel, score, now_oracle.query_count, end_time-start_time)
-
+                print(file_name[:4], channel, score, now_oracle.query_count, end_time-start_time, sep=',')
+    
 def match_strem(prop, query_map):
     dir_path = '../lyft-dataset/processed'
+    print("File", "Channel", "Score", "QueryCount", "Time", sep=',')  
     for file_name in os.listdir(dir_path):
             if 'sample' in file_name:
                  continue
-            print(file_name)
             file_path = os.path.join(dir_path, file_name)
             traces = read_boxes(file_path)
-            matcher = Matcher(prop, StremOracle(query_map))
-            score = False
             for channel, trace in traces.items():
-                for frame in trace:    
+                start_time = time.perf_counter()
+                now_oracle = StremOracle(query_map)
+                matcher = Matcher(prop, now_oracle)
+                score = -1
+                for frame in trace:  
                     score = matcher.match(frame)
-                if score:
-                    print("Match", channel)
+                end_time = time.perf_counter()
+                print(file_name[:4], channel, score, now_oracle.query_count, end_time-start_time, sep=',')
+
+def draw_sequence(trace, name):
+     n_values = list(range(0, len(trace)))
+     plt.plot(n_values, trace, marker='o', linestyle='-', color='b', label=r'$a_n = n^2$')
+     plt.xlabel('n (Index)')
+     plt.ylabel(r'$a_n$ (Value)')
+     plt.xticks(n_values)  # Ensure all integer indices are shown
+     plt.grid(True, linestyle='--', alpha=0.7)
+     plt.legend()
+     plt.savefig(name+'.png')
 
 def match_shapexp(prop, query_map):
-     X, Y = load_ecg_data()
+     X, _ = load_ecg_data()
      trace = X[0, :, 11]
-     i = 0
-     matcher = Matcher(prop, ShapeExpressionOracle(query_map, 0.02))
+     #draw_sequence(trace)
+     score = -1
+     print("File","Score","QueryCount","Time")
+     start_time = time.perf_counter()
+     now_oracle = ShapeExpressionOracle(query_map, 0.02, 120)
+     matcher = Matcher(prop, now_oracle)
      for frame in trace:
-        score = matcher.match(frame)
-        i += 1
+        score = matcher.match(frame)     
+     end_time = time.perf_counter()
+     print("0",  score, now_oracle.query_count, end_time-start_time, sep=',')
      
-shapexp_semres = ["[1-1]*[1-1]*^<3,1000,e_inf_inf_0_inf_inf_inf>[1-1]*^<3,1000,e_inf_inf_inf_0_inf_inf>[1-1]*^<3,1000,l_0_inf_inf_inf>[1-1]*^<3,1000,l_0_inf_inf_inf>[1-1]*^<3,1000,l_inf_0_inf_inf>[1-1]*^<3,1000,e_inf_inf_0_inf_inf_inf>[1-1]*^<3,1000,e_inf_inf_inf_0_inf_inf>[1-1]*",
+shapexp_semres = ["[1-1]*[1-1]*^<4,120,e_inf_inf_0_inf_inf_10>[1-1]*^<4,120,e_inf_inf_inf_0_inf_10>[1-1]*^<4,120,l_inf_inf_0_inf>[1-1]*^<4,120,l_inf_inf_0_inf>[1-1]*^<4,120,l_inf_inf_inf_0>[1-1]*^<4,120,e_inf_inf_0_inf_inf_10>[1-1]*^<4,120,e_inf_inf_inf_0_inf_10>[1-1]*",
                   ]
-moving_semres = ["[1-1]*[24-40]^<24,40,car_pedestrian_close>[24-40][24-40]^<24,40,car_pedestrian_far>",
+moving_semres = ["[1-1]*[10-20]^<10,20,car_pedestrian_close>[10-20][10-20]^<10,20,car_pedestrian_far>",
                 ]
-strem_semres = ["[1-1]*[1-1]^<1,1,~[emp](:pedestrian:&:bicycle:)>[1-1]*"]
+strem_semres = ["[1-1]*[1-1]^<1,1,~[emp](:pedestrian:&:bicycle:)>[1-1]*",
+                "[1-1]*[1-1]^<1,1,~[emp](:pedestrian:&:car:)>([1-1]^<1,1,~[emp](:pedestrian:&:car:)>)*[1-1]^<1,1,:pedestrian:[and]([emp](:pedestrian:&:car:))>([1-1]^<1,1,:pedestrian:[and]([emp](:pedestrian:&:car:))>)*[1-1]^<1,1,~[emp](:pedestrian:&:car:)>([1-1]^<1,1,~[emp](:pedestrian:&:car:)>)*[1-1]*",
+                "[1-1]*[1-1]^<1,1,[exists]_p(:pedestrian:)([exists]_q(:truck:)([leq]([y](_p),[y](_q))[and]([leq]([dist](_p,_q),2)[and][leq]([x](_p),[x](:ego:)))))>([1-1]^<1,1,[exists]_p(:pedestrian:)([exists]_q(:truck:)([leq]([y](_p),[y](_q))[and]([leq]([dist](_p,_q),2)[and][leq]([x](_p),[x](:ego:)))))>)*[1-1]*",
+                "[1-1]*[1-1]^<1,1,~[emp](:pedestrian:&(:othervehicle:[union]:emergencyvehicle:))>[1-1]*",
+                "[1-1]*[1-200]^<1,200,:sign:>[1-1]^<1,1,~[emp](((:othervehicle:[union]:emergencyvehicle:)[union]:pedestrian:)&:sign:)>[1-1]*",
+                "[1-1]*[80-80]^<80,80,[exists]_v(:bicycle:)([leq]([x](_v),[x](:ego:))[and]([leq]([y](_v),[y](:ego:))[and][leq]([dist](_v,[:ego:]),1.0)))>[1-1]*"]
 
 argparser = argparse.ArgumentParser()
 argparser.add_argument("type", type=str)

@@ -1,4 +1,4 @@
-from strem.formula import *
+from strem.stremformula import *
 from strem.expression import *
 from strem.term import *
 
@@ -48,17 +48,20 @@ def build_exp(tree) -> MetricExpression:
         
 
 def build_term(tree) -> SpatialTerm:
-    if "Token" in str(type(tree.children[0])):
-        first_token_type = tree.children[0].type
-        first_token_val = str(tree.children[0])
-        if first_token_type == "OPENPAR":
-            return build_term(tree.children[1])
-        if first_token_type == "ATOM":
-            return Atom(first_token_val[1:-1])
-        if first_token_type == "VAR":
-            return Var(first_token_val)
-        return Complement(build_term(tree.children[2]))
-    if tree.children[1].type == "UNION":
-        return Union(build_term(tree.children[0]), build_term(tree.children[2]))
-    return Intersection(build_term(tree.children[0]), build_term(tree.children[2]))
+    if "Token" in str(type(tree)):
+        if tree.type == "ATOM":
+            return Atom(str(tree)[1:-1])
+        if tree.type == "VAR":
+            return Var(str(tree))
+    if len(tree.children) == 1:
+        return build_term(tree.children[0])
+    if "Token" in str(type(tree.children[1])):
+        if tree.children[1].type == "UNION":
+            return Union(build_term(tree.children[0]), build_term(tree.children[2]))
+        else:
+            return Intersection(build_term(tree.children[0]), build_term(tree.children[2]))
+    first_token_type = tree.children[0].type
+    if first_token_type == "OPENPAR":
+        return build_term(tree.children[1])
+    return Complement(build_term(tree.children[2]))
         

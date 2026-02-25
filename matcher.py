@@ -5,104 +5,84 @@ class Matcher:
 		self._prop = prop
 		self.oracle = oracle
 		self.counter = 0
-		self._cache = {}
+		self._refined_cache = {}
+		self._refine_frees_cache = {}
 		self._refine_frees = set()
-		self.add_largest_refine_free_parts(self._prop)
-		self._epsilon_accepting = set()
+		self.add_refine_free_parts(self._prop)
 		for prop in self._refine_frees:
-			self.add_epsilon_accepting(prop)
+			self._refine_frees_cache[prop] = set()
+		self.refine_free_update_all(0)
 
-	def add_epsilon_accepting(self, prop: SeqTLProp):
+	def refine_free_update_all(self, length: int):
+		for prop in self._refine_frees:
+			self.refine_free_update(prop, length)
+
+	def refine_free_update(self, prop: SeqTLProp, length: int):
 		if type(prop) == StarProp:
-			self.add_epsilon_accepting(prop.child)
-			self._epsilon_accepting.add(prop)
-		elif type(prop) == LengthProp and prop.lb == 0:
-			self._epsilon_accepting.add(prop)
+			self.star_refine_free_update(prop, length)
+		elif type(prop) == LengthProp:
+			if length >= prop.lb and length <= prop.ub:
+				self._refine_frees_cache[prop].add(length)
 		elif type(prop) == UnionProp:
-			self.add_epsilon_accepting(prop.left)
-			self.add_epsilon_accepting(prop.right)
-			if prop.left in self._epsilon_accepting or prop.right in self._epsilon_accepting:
-				self._epsilon_accepting.add(prop)
+			self.union_refine_free_update(prop)
 		elif type(prop) == ConcatProp:
-			self.add_epsilon_accepting(prop.left)
-			self.add_epsilon_accepting(prop.right)
-			if prop.left in self._epsilon_accepting and prop.right in self._epsilon_accepting:
-				self._epsilon_accepting.add(prop)
+			self.concat_refine_free_update(prop)
 
-	def add_largest_refine_free_parts(self, prop: SeqTLProp):
+	def concat_refine_free_update(self, prop: UnionProp, length: int):
+		self.refine_free_update(prop.left)
+		self.refine_free_update(prop.right)
+		set1 = self._refine_frees_cache[prop.left]
+		set2 = self._refine_frees_cache[prop.right]
+		swap_set = set()
+		if len(set1) > len(set2):
+			swap_set = set1
+			set1 = set2
+			set2 = swap_set
+		for i in set1:
+			if length-i in set2:
+				self._refine_frees_cache[prop].add(length)
+				break
+	
+	def union_refine_free_update(self, prop: UnionProp, length: int):
+		self.refine_free_update(prop.left)
+		self.refine_free_update(prop.right)
+		if length in self._refine_frees_cache[prop.left] or length in self._refine_frees_cache[prop.right]:
+			self._refine_frees_cache[prop].add(length)
+	
+	def star_refine_free_update(self, prop: StarProp, length: int):
+		if length == 0:
+				self._refine_frees_cache[prop].add(0)
+		self.refine_free_update(prop.child, length)
+		for i in self._refine_frees_cache[prop.child]:
+			if length-i in self._refine_frees_cache[prop]:
+				self._refine_frees_cache[prop].add(length)
+				break
+	
+	def add_refine_free_parts(self, prop: SeqTLProp):
 		if type(prop) == LengthProp:
+			self._refine_frees.add(prop)
 			return True
 		if type(prop) == RefineProp:
-			_ = self.add_largest_refine_free_parts(prop.child)
+			self.add_refine_free_parts(prop.child)
 			return False
 		if type(prop) == StarProp:
-			result = self.add_largest_refine_free_parts(prop.child)
+			result = self.add_refine_free_parts(prop.child)
 			if result:
-				self._refine_frees.discard(prop.child)
 				self._refine_frees.add(prop)
 			return result
 		if type(prop) in [UnionProp, ConcatProp]:
-			first = self.add_largest_refine_free_parts(prop.left)
-			last = self.add_largest_refine_free_parts(prop.right)
+			first = self.add_refine_free_parts(prop.left)
+			last = self.add_refine_free_parts(prop.right)
 			result = first and last
 			if result:
-				self._refine_frees.discard(first)
-				self._refine_frees.discard(last)
 				self._refine_frees.add(prop)
 			return result
 		
-	def norefine_update(self, prop: SeqTLProp):
-		if type(prop) == LengthProp:
-			self.length_norefine_update(prop)
-		elif type(prop) == UnionProp:
-			self.union_norefine_update(prop)
-		elif type(prop) == ConcatProp:
-			self.concat_norefine_update(prop)
-		elif type(prop) == StarProp:
-			self.star_norefine_prop(prop)
-
-	def star_norefine_prop(self, prop: StarProp):
-		self.norefine_update(prop.child)
-		trace_length = len(self.oracle.trace)
-		for i in range(trace_length-1, -1, -1):
-			result = 0.0
-			for mid in range(i+1, trace_length+1):
-				left_val = self._cache[prop.child, i, mid]
-				right_val = self._cache[prop, mid, trace_length] if mid < trace_length else 1.0
-				result = max(result, min(left_val, right_val))
-			self._cache[prop, i, trace_length] = result
-
-	def union_norefine_update(self, prop: UnionProp):
-		self.norefine_update(prop.left)
-		self.norefine_update(prop.right)
-		trace_length = len(self.oracle.trace)
-		for i in range(trace_length):
-			self._cache[prop, i, trace_length] = max(self._cache[prop.left, i, trace_length], self._cache[prop.right, i, trace_length])
-
-	def concat_norefine_update(self, prop: ConcatProp):
-		self.norefine_update(prop.left)
-		self.norefine_update(prop.right)
-		trace_length = len(self.oracle.trace)
-		for i in range(trace_length-1, -1, -1):
-			result = 0.0
-			for mid in range(i, trace_length+1):
-				left_val = self._cache[prop.left, i, mid] if i < mid else prop.left in self._epsilon_accepting
-				right_val = self._cache[prop.right, mid, trace_length] if mid < trace_length else prop.right in self._epsilon_accepting
-				result = max(result, min(left_val, right_val))
-			self._cache[prop, i, trace_length] = result
-			
-	def length_norefine_update(self, prop: LengthProp):
-		trace_length = len(self.oracle.trace)
-		for i in range(trace_length):
-			length = len(self.oracle.trace)-i
-			self._cache[prop, i, trace_length] = length >= prop.lb and length <= prop.ub
-
 	def evaluate(self, prop: SeqTLProp, fromm: int, to: int): # fromm inclusive, to exclusive
-		if (prop, fromm, to) in self._cache:
-			return self._cache[prop, fromm, to]
-		if type(prop) == LengthProp:
-			length = to-fromm
-			return length >= prop.lb and length <= prop.ub
+		if prop in self._refine_frees:
+			return to-fromm in self._refine_frees_cache[prop]
+		if (prop, fromm, to) in self._refined_cache:
+			return self._refined_cache[prop, fromm, to]
 		if type(prop) == UnionProp:
 			return self.eval_union(prop, fromm, to)
 		if type(prop) == ConcatProp:
@@ -118,10 +98,10 @@ class Matcher:
 			return 0.0
 		child_val = self.evaluate(prop.child, fromm, to)
 		if child_val == 0.0:
-			self._cache[prop, fromm, to] = 0.0
+			self._refined_cache[prop, fromm, to] = 0.0
 			return 0.0
 		result = min(self.oracle.compute(prop.query_id, fromm, to), child_val)
-		self._cache[prop, fromm, to] = result
+		self._refined_cache[prop, fromm, to] = result
 		return result
 		
 	def eval_star(self, prop: StarProp, fromm: int, to: int):
@@ -136,7 +116,7 @@ class Matcher:
 			output = max(min(child_val, recursive_val), output)
 			if output == 1.0:
 				break
-		self._cache[prop, fromm, to] = output
+		self._refined_cache[prop, fromm, to] = output
 		return output
 
 	def eval_concat(self, prop: ConcatProp, fromm: int, to: int):
@@ -149,21 +129,20 @@ class Matcher:
 			output = max(min(right_val, left_val), output)
 			if output == 1.0:
 				break
-		self._cache[prop, fromm, to] = output
+		self._refined_cache[prop, fromm, to] = output
 		return output
 
 	def eval_union(self, prop: UnionProp, fromm: int, to: int):
 		first_val = self.evaluate(prop.left, fromm, to)
 		if first_val == 1.0:
-			self._cache[prop, fromm, to] = 1.0
+			self._refined_cache[prop, fromm, to] = 1.0
 			return 1.0
 		second_val = self.evaluate(prop.right, fromm, to)
 		val = max(first_val, second_val)
-		self._cache[prop, fromm, to] = val
+		self._refined_cache[prop, fromm, to] = val
 		return val
 
 	def match(self, frame):
 		self.oracle.add_frame(frame)
-		for prop in self._refine_frees:
-			self.norefine_update(prop)
+		self.refine_free_update_all(len(self.oracle.trace))
 		return self.evaluate(self._prop, 0, len(self.oracle.trace))

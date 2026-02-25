@@ -1,4 +1,4 @@
-from strem.formula import *
+from strem.stremformula import *
 from strem.term import *
 from strem.expression import *
 import shapely
@@ -27,7 +27,7 @@ class Evaluator:
     def eval(self, formula: SpatialFormula) -> bool:
         formula_type = type(formula)
         if formula_type == AtomFormula:
-            return self.eval_atom(formula.atom.name)
+            return self.eval_atom(formula.atom.obj_type)
         if formula_type == Exists:
             return self.eval_exists(formula)
         if formula_type == Empty:
@@ -85,7 +85,7 @@ class Evaluator:
     def eval_atom_boxes(self, name: str):
         shape = Polygon()
         for obj in self._frame['annotations']:
-            if obj['class'] == name: 
+            if obj['class'].replace("_","") == name: 
                 shape = shapely.union(shape, obj_to_box(obj))
         return shape
 
@@ -93,7 +93,7 @@ class Evaluator:
         var_name = exists_formula.var.name
         obj_type = exists_formula.atom.obj_type
         child = exists_formula.child
-        for obj in self._frame:
+        for obj in self._frame['annotations']:
             if obj['class'] == obj_type:
                 self._var_map[var_name] = obj
                 result = self.eval(child)
@@ -103,7 +103,7 @@ class Evaluator:
         return False
 
     def eval_atom(self, name: str) -> bool:
-        for obj in self._frame:
+        for obj in self._frame['annotations']:
             if name == obj['class']:
                 return True
         return False

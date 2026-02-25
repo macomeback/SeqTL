@@ -16,7 +16,7 @@ class PropBuilder:
         if len(parsed_tree.children) == 3:
             if parsed_tree.children[1] == "|":
                 return self._build_union_prop(parsed_tree)
-            return self.build_prop(parsed_tree.children[1])
+            return self._build_prop(parsed_tree.children[1])
         if len(parsed_tree.children) == 2:
             if parsed_tree.children[1] == "*":
                 return self._build_star_prop(parsed_tree)
