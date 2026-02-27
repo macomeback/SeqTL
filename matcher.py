@@ -78,11 +78,17 @@ class Matcher:
 				self._refine_frees.add(prop)
 			return result
 		
-	def evaluate(self, prop: SeqTLProp, fromm: int, to: int): # fromm inclusive, to exclusive
+	def check_cache(self, prop, fromm, to):
 		if prop in self._refine_frees:
 			return to-fromm in self._refine_frees_cache[prop]
 		if (prop, fromm, to) in self._refined_cache:
 			return self._refined_cache[prop, fromm, to]
+		return None
+		
+	def evaluate(self, prop: SeqTLProp, fromm: int, to: int): # fromm inclusive, to exclusive
+		cache_result = self.check_cache(prop, fromm, to)
+		if cache_result is not None:
+			return cache_result
 		if type(prop) == UnionProp:
 			return self.eval_union(prop, fromm, to)
 		if type(prop) == ConcatProp:
@@ -103,32 +109,42 @@ class Matcher:
 		result = min(self.oracle.compute(prop.query_id, fromm, to), child_val)
 		self._refined_cache[prop, fromm, to] = result
 		return result
+	
+	def segment_concat(self, prop: SeqTLProp, fromm: int, to: int):
+		left = None
+		right = None
+		mid_from = 0
+		if type(prop) == StarProp:
+			left = prop.child
+			right = prop
+			mid_from = fromm+1
+		else:
+			left = prop.left
+			right = prop.right
+			mid_from = fromm
+		output = 0.0
+		for mid in range(mid_from, to+1):
+			cache_right = self.check_cache(right, mid, to)
+			if cache_right is not None and cache_right <= output:
+				continue
+			left_val = self.evaluate(left, fromm, mid)
+			if left_val <= output:
+				continue
+			right_val = self.evaluate(right, mid, to)
+			output = max(min(right_val, left_val), output)
+			if output == 1.0:
+				break
+		return output
 		
 	def eval_star(self, prop: StarProp, fromm: int, to: int):
 		if to == fromm:
 			return 1.0
-		output = 0.0
-		for mid in range(fromm+1, to+1):
-			child_val = self.evaluate(prop.child, fromm, mid)
-			if child_val <= output:
-				continue
-			recursive_val = self.evaluate(prop, mid, to)
-			output = max(min(child_val, recursive_val), output)
-			if output == 1.0:
-				break
+		output = self.segment_concat(prop, fromm, to)
 		self._refined_cache[prop, fromm, to] = output
 		return output
 
 	def eval_concat(self, prop: ConcatProp, fromm: int, to: int):
-		output = 0
-		for mid in range(fromm, to+1):
-			left_val = self.evaluate(prop.left, fromm, mid)
-			if left_val <= output:
-				continue
-			right_val = self.evaluate(prop.right, mid, to)
-			output = max(min(right_val, left_val), output)
-			if output == 1.0:
-				break
+		output = self.segment_concat(prop, fromm, to)
 		self._refined_cache[prop, fromm, to] = output
 		return output
 

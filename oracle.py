@@ -1,17 +1,15 @@
 import random
 import numpy as np
-from scipy.optimize import lsq_linear
 import warnings
 #import torch
 #from numpy.typing import NDArray, Shape
 from lark import Lark
 from strem.builder import build_formula
 from strem.evaluator import Evaluator
-from lmfit import Parameters, Minimizer
-from lmfit.models import ExponentialModel, LinearModel, ConstantModel, Model
-from numpy.linalg import LinAlgError
-import time
+from lmfit.models import Model
+import random
 import matplotlib.pyplot as plt
+import time
 
 def draw_sequence2(trace, name):
 	n_values = list(range(0, len(trace)))
@@ -96,7 +94,7 @@ class RandomOracle:
 		return response
 	
 class ShapeExpressionOracle:
-	def __init__(self, query_map: dict[str, int], noise_tolerance: float, max_query_length):
+	def __init__(self, query_map: dict[str, int], noise_tolerance: float, scale_factor):
 		warnings.filterwarnings("ignore", category=FutureWarning, module="uncertainties")
 		self._queries: list = [None]*len(query_map)
 		self._tolerance = noise_tolerance
@@ -104,11 +102,12 @@ class ShapeExpressionOracle:
 		self._cache = {}
 		self._current_x = np.zeros(0, dtype=int)
 		self.trace = np.zeros(0, dtype=float)
+		self.trace_sum = np.zeros(0, dtype=float)
 		self.query_count = 0
 		self._params = {}
 		self._r2 = {}
-		self._funcs = {"e": self.exp, "l": self.lin, "s": self.sin}
-		self._max_query_length = max_query_length
+		self._funcs = {"e": self.exp, "l": self.lin, "s": self.sinc}
+		self.scale_factor = scale_factor
 
 	def _fill_queries(self, query_map):
 		for query_str, query_id in query_map.items():
@@ -133,121 +132,163 @@ class ShapeExpressionOracle:
 		self.query_count += 1
 		if self.query_count % 1000 == 0:
 			print(self.query_count)
-		result = self.atomic_match(fromm, to, *self._queries[query_id])
+		result = self.atomic_match(fromm, to, query_id)
+		if result:
+			print(self._queries[query_id], fromm, to)
 		self._cache[query_id, fromm, to] = result
-		if result and to-fromm>20:
-			print("Good", self._queries[query_id], fromm, to)
 		return result
 	
-	def normalize(self, trace):
-		min_trace = trace.min()
-		scale = trace.max()-min_trace
-		if scale > 0.0:
-			return (trace-min_trace)/scale
-		return trace
-	
-	def exp_objective(self, params, t, data, lb_list, ub_list):
-		c = params['c'].value
-		phi = np.column_stack([np.ones_like(t), np.exp(c * t)])
-		res = lsq_linear(phi, data, bounds=(lb_list, ub_list), lsq_solver='lsmr')
-		a, b = res.x
-		self._exp_params[c] = a, b
-		output = (a + b * np.exp(c * t)) - data
-		return output
-	
-	def exp_match(self, fromm, to, lb_list, ub_list) -> bool:
+	def heuristic_exp_reject(self, fromm, to) -> bool:
 		trace = self.trace[fromm: to]
-		x = self._current_x[:len(trace)]/self._max_query_length
-		if self.incremental_check(fromm, to, "e"):
+		if len(trace)<10:
+			return False
+		mid = trace[int(len(trace)/2)]
+		if mid>=trace[0] and mid>=trace[-1] or mid <=trace[0] and mid <= trace[-1]:
 			return True
-		model = Model(self.exp)
-		params = model.make_params()
-		param_names = ['a','b','c']
-		for i in range(len(param_names)):
-			name = param_names[i]
-			params[name].min = lb_list[i]
-			params[name].max = ub_list[i]
+		third = len(trace)/3
+		min_idx = np.argmin(trace)
+		max_idx = np.argmax(trace)
+		return (max_idx > third and max_idx <2*third) or (min_idx > third and min_idx <2*third)
+	
+	def exponent_heuristics(self, trace) -> float:
+		sample_size = 10
+		gradient_approx = np.zeros(sample_size)
+		for i in range(len(gradient_approx)):
+			idx = random.randint(0, len(trace)-3)
+			if trace[idx+1] != trace[idx]:
+				gradient_approx[i] = (trace[idx+2]-trace[idx+1])/(trace[idx+1]-trace[idx])
+		result = gradient_approx[gradient_approx != 0]
+		if len(result) == 0:
+			return 0
+		mean = np.mean(result)
+		if mean<= 0:
+			return 0
+		return self.scale_factor*float(np.log(mean))
+
+	def exp_match(self, fromm, to, query_id) -> bool:
+		_, lb_list, ub_list = self._queries[query_id]
+		trace = self.trace[fromm: to]
+		x = self._current_x[:len(trace)]/self.scale_factor
+		if self.incremental_check(fromm, to, x[-1], query_id):
+			return True
+		if self.heuristic_exp_reject(fromm, to):
+			return False
+		model = self.get_model(self.exp, lb_list, ub_list)
 		a, b, c = 0, 1, 0
-		if ("e",fromm, to-1) in self._params:
-			a, b, c = self._params["e", fromm, to-1]
+		if (query_id,fromm, to-1) in self._params:
+			a, b, c = self._params[query_id, fromm, to-1]
+		else:
+			c = self.exponent_heuristics(trace)
 		result = model.fit(trace, t=x, a=a, b=b, c=c)
+		duration = time.perf_counter()-start
 		if result.rsquared > 0.7:
-			self._params["e", fromm, to] = result.best_values['a'], result.best_values['b'], result.best_values['c']
+			self._params[query_id, fromm, to] = result.best_values['a'], result.best_values['b'], result.best_values['c']
 		if result.rsquared>.98:
-			self._r2["e", fromm, to] = self.get_res_tot_mean(trace, float(result.rsquared))
+			mean = self.get_trace_mean(fromm, to)
+			self._r2[query_id, fromm, to] = self.get_res_tot(trace, float(result.rsquared), mean)
 			return True
 		return False
 	
-	def incremental_check(self, fromm, to, func_type):
-		if (func_type, fromm, to-1) not in self._r2:
+	def incremental_check(self, fromm, to, x_new, query_id):
+		if (query_id, fromm, to-1) not in self._r2:
 			return False
-		res, tot, mean = self._r2[func_type, fromm, to-1]
-		func = self._funcs[func_type]
-		params = self._params[func_type, fromm, to-1]
-		element_new = self.trace[to-1]/self._max_query_length
-		pred_new = func(element_new, *params)
-		res, tot, mean = self.incremental_r2(res, tot, mean, element_new, pred_new, to-fromm-1)
-		r2 = 1-res/tot
+		res, tot = self._r2[query_id, fromm, to-1]
+		mean = self.get_trace_mean(fromm, to)
+		func = self._funcs[self._queries[query_id][0]]
+		params = self._params[query_id, fromm, to-1]
+		y_new = self.trace[to-1]
+		pred_new = func(x_new, *params)
+		res, tot = self.incremental_r2(res, tot, mean, y_new, pred_new, to-fromm-1)
+		r2 = 1-res/tot if tot != 0.0 else 0.0
 		if r2 <= .98:
 			return False
-		self._r2[func_type, fromm, to] = res, tot, mean
-		self._params[func_type, fromm, to] = self._params[func_type, fromm, to-1]
+		self._r2[query_id, fromm, to] = res, tot
+		self._params[query_id, fromm, to] = self._params[query_id, fromm, to-1]
 		return True
 	
 	def incremental_r2(self, res, tot, mean, element_new, pred_new, len):
 		mean_new = (len*mean+element_new)/(len+1)
 		tot_new = tot + (element_new-mean)*(element_new-mean_new)
 		res_new = res + (element_new-pred_new)**2
-		return res_new, tot_new, mean_new
+		return res_new, tot_new
 	
-	def get_res_tot_mean(self, trace, r2):
-		mean = float(np.mean(trace))
+	def get_res_tot(self, trace, r2, mean):
 		tot = float(np.sum((trace-mean)**2))
 		res = (1-r2)*tot
-		return res, tot, mean
+		return res, tot
 	
-	def get_decay(self, lb_list, ub_list, is_positive) -> bool:
-		if is_positive:
-			return 1, max(lb_list[2], .01), ub_list[2]
-		return -1, lb_list[2], min(ub_list[2], -1e-100)
+	def get_trace_mean(self, fromm, to):
+		sum = self.trace_sum[to-1] if fromm == 0 else self.trace_sum[to-1]-self.trace_sum[fromm-1]
+		return sum/(to-fromm)
 	
-	def lin_match(self, fromm, to, lb_list, ub_list) -> bool:
+	def lin_match(self, fromm, to, query_id) -> bool:
+		trace = self.trace[fromm:to]
+		_, lb_list, ub_list = self._queries[query_id]
 		trace = self.trace[fromm: to]
-		model = LinearModel()
 		x = self._current_x[:len(trace)]
-		if self.incremental_check(fromm, to, "l"):
+		if self.incremental_check(fromm, to, x[-1], query_id):
 			return True
-		params = None
-		try:
-			if ("l", fromm, to-1) in self._params:
-				slope, intercept = self._params["l", fromm, to-1]
-				params = model.make_params()
-				params['slope'].set(value=slope)
-				params['intercept'].set(value=intercept)
-			else:
-				params = model.guess(x, trace)
-		except LinAlgError:
-			print("BBBB")
-			print(trace)
+		res = np.polyfit(x, trace, 1)
+		a, b = res[0], res[1]
+		a = max(lb_list[0], min(ub_list[0], a))
+		b = max(lb_list[1], min(ub_list[1], b))
+		mean = self.get_trace_mean(fromm, to)
+		res, tot = self.r2sq(trace-(a*x+b), trace, mean)
+		if tot == 0:
+			return False
+		r2 = 1-res/tot
+		if r2>.98:
+			self._params[query_id, fromm, to] = a, b
+			self._r2[query_id, fromm, to] = res, tot
 			return True
-		params['slope'].set(min=lb_list[1], max=ub_list[1])
-		params['intercept'].set(min=lb_list[0], max=ub_list[0])
-		result = model.fit(trace, params, x=x)
-		if result.rsquared>.7:
-			self._params["l", fromm, to] = result.params["slope"], result.params["intercept"]
+		return False
+	
+	def get_model(self, func, lb_list, ub_list):
+		model = Model(func)
+		params = model.make_params()
+		param_names = ['a','b','c']
+		for i in range(len(param_names)):
+			name = param_names[i]
+			params[name].min = lb_list[i]
+			params[name].max = ub_list[i]
+		return model
+	
+	def heuristic_sinc_reject(self, fromm, to):
+		trace = self.trace[fromm: to]
+		length = to-fromm
+		mean = self.get_trace_mean(fromm, to)
+		normalized_trace = trace-mean
+		ratio = np.max(np.abs(normalized_trace))/np.sqrt(np.sum(normalized_trace**2)/length)
+		return float(ratio)<1.5
+	
+	def sinc_match(self, fromm, to, query_id):
+		_, lb_list, ub_list = self._queries[query_id]
+		trace = self.trace[fromm: to]
+		x = self._current_x[:len(trace)]/self.scale_factor
+		if self.incremental_check(fromm, to, x[-1], query_id):
+			return True
+		if self.heuristic_sinc_reject(trace):
+			return False
+		model = self.get_model(self.sinc, lb_list, ub_list)
+		a, b, c = 0, 1, 0
+		if (query_id,fromm, to-1) in self._params:
+			a, b, c = self._params[query_id, fromm, to-1]
+		else:
+			c = self.exponent_heuristics(trace)
+		result = model.fit(trace, t=x, a=a, b=b, c=c)
+		if result.rsquared > 0.7:
+			self._params[query_id, fromm, to] = result.best_values['a'], result.best_values['b'], result.best_values['c']
 		if result.rsquared>.98:
-			self._r2["l", fromm, to] = self.get_res_tot_mean(trace, float(result.rsquared))
+			self._r2[query_id, fromm, to] = self.get_res_tot(trace, float(result.rsquared))
 			return True
 		return False
 
-	def r2sq(self, residual, y):
-		rss = np.sum(residual**2)
-		tss = np.sum((y - np.mean(y))**2)
-		if tss==0:
-			return 0.0
-		return 1 - (rss / tss)
+	def r2sq(self, residual, y, mean):
+		res = np.sum(residual**2)
+		tot = np.sum((y - mean)**2)
+		return res, tot
 	
-	def atomic_match(self, fromm, to, shape, lb_list, ub_list) -> bool:
+	def atomic_match(self, fromm, to, query_id) -> bool:
 		#trace = self.normalize_trace(trace)
 		# param_names = ['a','b','c','d']
 		# model = Model(shape, independent_vars=['t'])
@@ -259,14 +300,18 @@ class ShapeExpressionOracle:
 		# 		params[param_names[i]].set(max=ub_list[i])
 		# result = model.fit(trace, params, t=self._current_x[:len(trace)])
 		# summary = result.summary()
+		shape, _, _ = self._queries[query_id]
 		if shape == "e":
-			return self.exp_match(fromm, to, lb_list, ub_list)
-		if shape == "l":
-			return self.lin_match(fromm, to, lb_list, ub_list)
-		return 0
+			return self.exp_match(fromm, to, query_id)
+		elif shape == "l":
+			return self.lin_match(fromm, to, query_id)
+		else:
+			return self.sinc_match(fromm, to, query_id)
 	
 	def add_frame(self, frame):
 		self.trace = np.append(self.trace, [frame])
+		sum = self.trace[0] if len(self.trace) == 1 else self.trace_sum[-1]+self.trace[-1]
+		self.trace_sum = np.append(self.trace_sum, [sum])
 		self._current_x = np.append(self._current_x, [len(self.trace)-1])
 
 	def lin(self, t, a=0, b=0):
@@ -276,8 +321,8 @@ class ShapeExpressionOracle:
 		exponent = np.clip(c * t, -700, 700)
 		return a+b*np.exp(exponent)
 	
-	def sin(self, t, a=0, b=0, c=0, d=0) -> float:
-		return a+b*np.sin(c*t+d)
+	def sinc(self, t, a=0, b=0, c=0, d=0) -> float:
+		return a+b*np.sinc((c*t+d)/np.pi)
 	
 class VideoOracle:
 	def __init__(self, query_map: dict[str, int]):

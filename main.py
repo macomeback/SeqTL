@@ -109,7 +109,7 @@ def match_strem(prop, query_map):
 
 def draw_sequence(trace, name):
      n_values = list(range(0, len(trace)))
-     plt.plot(n_values, trace, marker='o', linestyle='-', color='b', label=r'$a_n = n^2$')
+     plt.plot(n_values, trace, marker='o', linestyle='None', color='b', label=r'$a_n = n^2$')
      plt.xlabel('n (Index)')
      plt.ylabel(r'$a_n$ (Value)')
      plt.xticks(n_values)  # Ensure all integer indices are shown
@@ -120,19 +120,18 @@ def draw_sequence(trace, name):
 def match_shapexp(prop, query_map):
      X, _ = load_ecg_data()
      trace = X[0, :, 11]
-     #draw_sequence(trace)
      score = -1
      print("File","Score","QueryCount","Time")
      start_time = time.perf_counter()
      now_oracle = ShapeExpressionOracle(query_map, 0.02, 120)
      matcher = Matcher(prop, now_oracle)
      for frame in trace:
-        score = matcher.match(frame)     
+        score = matcher.match(frame) 
      end_time = time.perf_counter()
-     print("0",  score, now_oracle.query_count, end_time-start_time, sep=',')
+     print("shape0",  score, now_oracle.query_count, end_time-start_time, sep=',')
      
-shapexp_semres = ["[1-1]*[1-1]*^<4,120,e_inf_inf_0_inf_inf_10>[1-1]*^<4,120,e_inf_inf_inf_0_inf_10>[1-1]*^<4,120,l_inf_inf_0_inf>[1-1]*^<4,120,l_inf_inf_0_inf>[1-1]*^<4,120,l_inf_inf_inf_0>[1-1]*^<4,120,e_inf_inf_0_inf_inf_10>[1-1]*^<4,120,e_inf_inf_inf_0_inf_10>[1-1]*",
-                  ]
+shapexp_semres = ["[1-1]*[1-1]*^<10,50,e_inf_inf_0_inf_inf_10>[1-1]*^<10,50,e_inf_inf_inf_0_inf_10>[1-1]*^<10,50,l_0_inf_inf_inf>[1-1]*^<10,50,l_0_inf_inf_inf>[1-1]*^<10,50,l_inf_0_inf_inf>[1-1]*^<10,50,e_inf_inf_0_inf_inf_10>[1-1]*^<10,50,e_inf_inf_inf_0_inf_10>[1-1]*",
+                  "[1-1]*[1-1]*^<10,30,l_inf_0.5_inf_inf>[1-1]*^<10,30,s_inf_inf_inf_inf_inf_inf_inf_inf>[1-1]*"]
 moving_semres = ["[1-1]*[10-20]^<10,20,car_pedestrian_close>[10-20][10-20]^<10,20,car_pedestrian_far>",
                 ]
 strem_semres = ["[1-1]*[1-1]^<1,1,~[emp](:pedestrian:&:bicycle:)>[1-1]*",
