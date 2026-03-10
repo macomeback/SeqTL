@@ -9,7 +9,7 @@ from strem.evaluator import Evaluator
 from lmfit.models import Model
 import random
 import matplotlib.pyplot as plt
-import time
+from scipy.optimize import lsq_linear
 
 def draw_sequence2(trace, name):
 	n_values = list(range(0, len(trace)))
@@ -94,10 +94,10 @@ class RandomOracle:
 		return response
 	
 class ShapeExpressionOracle:
-	def __init__(self, query_map: dict[str, int], noise_tolerance: float, scale_factor):
+	def __init__(self, query_map: dict[str, int], threshold: float, scale_factor):
 		warnings.filterwarnings("ignore", category=FutureWarning, module="uncertainties")
 		self._queries: list = [None]*len(query_map)
-		self._tolerance = noise_tolerance
+		self._threshold = threshold
 		self._fill_queries(query_map)
 		self._cache = {}
 		self._current_x = np.zeros(0, dtype=int)
@@ -126,68 +126,89 @@ class ShapeExpressionOracle:
 					ub_list.append(float(parts[i]))
 			self._queries[query_id] = (parts[0], lb_list, ub_list)
 
-	def compute(self, query_id: int, fromm: int, to: int) -> bool:
-		if (query_id, fromm, to) in self._cache:
-			return self._cache[query_id, fromm, to]
-		self.query_count += 1
-		if self.query_count % 1000 == 0:
-			print(self.query_count)
-		result = self.atomic_match(fromm, to, query_id)
-		if result:
-			print(self._queries[query_id], fromm, to)
-		self._cache[query_id, fromm, to] = result
-		return result
-	
-	def heuristic_exp_reject(self, fromm, to) -> bool:
-		trace = self.trace[fromm: to]
-		if len(trace)<10:
-			return False
-		mid = trace[int(len(trace)/2)]
-		if mid>=trace[0] and mid>=trace[-1] or mid <=trace[0] and mid <= trace[-1]:
-			return True
-		third = len(trace)/3
-		min_idx = np.argmin(trace)
-		max_idx = np.argmax(trace)
-		return (max_idx > third and max_idx <2*third) or (min_idx > third and min_idx <2*third)
-	
-	def exponent_heuristics(self, trace) -> float:
-		sample_size = 10
-		gradient_approx = np.zeros(sample_size)
-		for i in range(len(gradient_approx)):
-			idx = random.randint(0, len(trace)-3)
-			if trace[idx+1] != trace[idx]:
-				gradient_approx[i] = (trace[idx+2]-trace[idx+1])/(trace[idx+1]-trace[idx])
-		result = gradient_approx[gradient_approx != 0]
-		if len(result) == 0:
-			return 0
-		mean = np.mean(result)
-		if mean<= 0:
-			return 0
-		return self.scale_factor*float(np.log(mean))
+	def calculate_incremental_range(self, first_true_to, last_true_to, first_false_to, to):
+		if to>last_true_to and first_false_to == float('inf'):
+			return last_true_to+1, to+1
+		to_range = min(first_true_to, first_false_to, len(self.trace)+1)
+		return to, to_range
 
+	def compute(self, query_id: int, fromm: int, to: int) -> bool:
+		first_true_to = last_true_to = first_false_to = float('inf')
+		if (query_id, fromm) in self._cache:
+			first_true_to, last_true_to, first_false_to = self._cache[query_id, fromm]
+			if first_false_to != float('inf'):
+				if to >= first_false_to:
+					return False
+				if to >= first_true_to:
+					return True
+			elif to>= first_true_to and to <= last_true_to:
+				return True
+		self.query_count += 1
+		fromm_range, to_range = self.calculate_incremental_range(first_true_to, last_true_to, first_false_to, to)
+		result = False
+		final_result = False
+		for i in range(fromm_range, to_range):
+			result = self.atomic_match(fromm, i, query_id)
+			if i == to:
+				final_result = result
+			if not result:
+				first_false_to = i
+				break
+			last_true_to = i if last_true_to == float('inf') else max(last_true_to, i)
+			first_true_to = min(first_true_to, i)
+		self._cache[query_id, fromm] = (first_true_to, last_true_to, first_false_to)
+		return final_result
+	
+	def get_exp_coeffs_integral(self, y, t):
+		n = len(t)
+		S = np.zeros(n)
+		sign_change = 0
+		for i in range(1, n):
+			if i<n-1 and (y[i]-y[i-1])*(y[i+1]-y[i])<=0:
+				sign_change += 1
+			S[i] = S[i-1] + 0.5 * (y[i] + y[i-1]) * (t[i] - t[i-1])
+		if sign_change>=0.35*n:
+			return None
+		M1 = np.column_stack((S, t - t[0]))
+		Y1 = y - y[0]
+		coeffs, _, _, _ = np.linalg.lstsq(M1, Y1, rcond=None)
+		c_est = coeffs[0]
+		X = np.exp(c_est * t)
+		M2 = np.column_stack((np.ones(n), X))
+		final_coeffs, _, _, _ = np.linalg.lstsq(M2, y, rcond=None)
+		a_est, b_est = final_coeffs
+		return a_est, b_est, c_est
+	
+	def check_bounds(self, lb_list, ub_list, *params):
+		for i in range(len(lb_list)):
+			if params[i] <= lb_list[i] or params[i]>=ub_list[i]:
+				return False
+		return True
+	
 	def exp_match(self, fromm, to, query_id) -> bool:
 		_, lb_list, ub_list = self._queries[query_id]
 		trace = self.trace[fromm: to]
 		x = self._current_x[:len(trace)]/self.scale_factor
 		if self.incremental_check(fromm, to, x[-1], query_id):
 			return True
-		if self.heuristic_exp_reject(fromm, to):
+		coeffs = self.get_exp_coeffs_integral(trace, x)
+		if coeffs is None or not self.check_bounds(lb_list, ub_list, *coeffs):
 			return False
-		model = self.get_model(self.exp, lb_list, ub_list)
-		a, b, c = 0, 1, 0
-		if (query_id,fromm, to-1) in self._params:
-			a, b, c = self._params[query_id, fromm, to-1]
-		else:
-			c = self.exponent_heuristics(trace)
-		result = model.fit(trace, t=x, a=a, b=b, c=c)
-		duration = time.perf_counter()-start
-		if result.rsquared > 0.7:
-			self._params[query_id, fromm, to] = result.best_values['a'], result.best_values['b'], result.best_values['c']
-		if result.rsquared>.98:
-			mean = self.get_trace_mean(fromm, to)
-			self._r2[query_id, fromm, to] = self.get_res_tot(trace, float(result.rsquared), mean)
-			return True
-		return False
+		a, b, c = coeffs
+		model = self.get_model(self.exp, lb_list, ub_list, a, b, c)
+		result = model.fit(trace, t=x)
+		if result.rsquared<self._threshold:
+			return False
+		best_vals = result.params
+		a, b, c = float(best_vals['a']), float(best_vals['b']), float(best_vals['c'])
+		if b==0 or c==0:
+			return False
+		mean = self.get_trace_mean(fromm, to)
+		pred = a+b*np.exp(c*x)
+		res, tot = self.r2sq(trace-pred, trace, mean)
+		self._params[query_id, fromm, to] = a, b, c
+		self._r2[query_id, fromm, to] = res, tot
+		return True
 	
 	def incremental_check(self, fromm, to, x_new, query_id):
 		if (query_id, fromm, to-1) not in self._r2:
@@ -200,7 +221,7 @@ class ShapeExpressionOracle:
 		pred_new = func(x_new, *params)
 		res, tot = self.incremental_r2(res, tot, mean, y_new, pred_new, to-fromm-1)
 		r2 = 1-res/tot if tot != 0.0 else 0.0
-		if r2 <= .98:
+		if r2 <= self._threshold:
 			return False
 		self._r2[query_id, fromm, to] = res, tot
 		self._params[query_id, fromm, to] = self._params[query_id, fromm, to-1]
@@ -228,29 +249,31 @@ class ShapeExpressionOracle:
 		x = self._current_x[:len(trace)]
 		if self.incremental_check(fromm, to, x[-1], query_id):
 			return True
-		res = np.polyfit(x, trace, 1)
-		a, b = res[0], res[1]
-		a = max(lb_list[0], min(ub_list[0], a))
-		b = max(lb_list[1], min(ub_list[1], b))
+		A = np.column_stack([x, np.ones_like(x)])
+		res = lsq_linear(A, trace, bounds=(lb_list, ub_list))
+		a, b = res.x
 		mean = self.get_trace_mean(fromm, to)
 		res, tot = self.r2sq(trace-(a*x+b), trace, mean)
 		if tot == 0:
 			return False
 		r2 = 1-res/tot
-		if r2>.98:
+		if r2>self._threshold:
 			self._params[query_id, fromm, to] = a, b
 			self._r2[query_id, fromm, to] = res, tot
 			return True
 		return False
 	
-	def get_model(self, func, lb_list, ub_list):
+	def get_model(self, func, lb_list, ub_list, *params_initial):
 		model = Model(func)
 		params = model.make_params()
 		param_names = ['a','b','c']
 		for i in range(len(param_names)):
 			name = param_names[i]
-			params[name].min = lb_list[i]
-			params[name].max = ub_list[i]
+			params[name].set(
+			value=params_initial[i],
+			min=lb_list[i],
+			max=ub_list[i],
+			vary=True)
 		return model
 	
 	def heuristic_sinc_reject(self, fromm, to):
@@ -260,28 +283,6 @@ class ShapeExpressionOracle:
 		normalized_trace = trace-mean
 		ratio = np.max(np.abs(normalized_trace))/np.sqrt(np.sum(normalized_trace**2)/length)
 		return float(ratio)<1.5
-	
-	def sinc_match(self, fromm, to, query_id):
-		_, lb_list, ub_list = self._queries[query_id]
-		trace = self.trace[fromm: to]
-		x = self._current_x[:len(trace)]/self.scale_factor
-		if self.incremental_check(fromm, to, x[-1], query_id):
-			return True
-		if self.heuristic_sinc_reject(trace):
-			return False
-		model = self.get_model(self.sinc, lb_list, ub_list)
-		a, b, c = 0, 1, 0
-		if (query_id,fromm, to-1) in self._params:
-			a, b, c = self._params[query_id, fromm, to-1]
-		else:
-			c = self.exponent_heuristics(trace)
-		result = model.fit(trace, t=x, a=a, b=b, c=c)
-		if result.rsquared > 0.7:
-			self._params[query_id, fromm, to] = result.best_values['a'], result.best_values['b'], result.best_values['c']
-		if result.rsquared>.98:
-			self._r2[query_id, fromm, to] = self.get_res_tot(trace, float(result.rsquared))
-			return True
-		return False
 
 	def r2sq(self, residual, y, mean):
 		res = np.sum(residual**2)

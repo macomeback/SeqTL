@@ -1,10 +1,12 @@
 from prop import *
+import time
 
 class Matcher:
 	def __init__(self, prop: SeqTLProp, oracle):
 		self._prop = prop
 		self.oracle = oracle
 		self.counter = 0
+		self.measured_time = 0
 		self._refined_cache = {}
 		self._refine_frees_cache = {}
 		self._refine_frees = set()
@@ -81,8 +83,8 @@ class Matcher:
 	def check_cache(self, prop, fromm, to):
 		if prop in self._refine_frees:
 			return to-fromm in self._refine_frees_cache[prop]
-		if (prop, fromm, to) in self._refined_cache:
-			return self._refined_cache[prop, fromm, to]
+		if (prop, fromm) in self._refined_cache and to in self._refined_cache[prop, fromm]:
+			return self._refined_cache[prop, fromm][to]
 		return None
 		
 	def evaluate(self, prop: SeqTLProp, fromm: int, to: int): # fromm inclusive, to exclusive
@@ -98,17 +100,22 @@ class Matcher:
 		if type(prop) == RefineProp:
 			return self.eval_refine(prop, fromm, to)
 		
+	def add_refined_cache(self, prop: SeqTLProp, fromm: int, to: int, result: float):
+		if (prop, fromm) not in self._refined_cache:
+			self._refined_cache[prop, fromm] = {}
+		self._refined_cache[prop, fromm][to] = result
+		
 	def eval_refine(self, prop: RefineProp, fromm: int, to: int):
 		length = to-fromm
 		if length > prop.ub or prop.lb > length:
 			return 0.0
 		child_val = self.evaluate(prop.child, fromm, to)
 		if child_val == 0.0:
-			self._refined_cache[prop, fromm, to] = 0.0
+			self.add_refined_cache(prop, fromm, to, 0.0)
 			return 0.0
-		result = min(self.oracle.compute(prop.query_id, fromm, to), child_val)
-		self._refined_cache[prop, fromm, to] = result
-		return result
+		output = min(self.oracle.compute(prop.query_id, fromm, to), child_val)
+		self.add_refined_cache(prop, fromm, to, output)
+		return output
 	
 	def segment_concat(self, prop: SeqTLProp, fromm: int, to: int):
 		left = None
@@ -122,17 +129,16 @@ class Matcher:
 			left = prop.left
 			right = prop.right
 			mid_from = fromm
+		mid_from = max(mid_from, fromm+left.lb, to-right.ub if right.ub != float('inf') else mid_from)
+		mid_to = min(to, fromm+left.ub, to-right.lb)
 		output = 0.0
-		for mid in range(mid_from, to+1):
-			cache_right = self.check_cache(right, mid, to)
-			if cache_right is not None and cache_right <= output:
+		for mid in range(mid_from, mid_to):
+			first_val = self.evaluate(left, fromm, mid)
+			if first_val <= output:
 				continue
-			left_val = self.evaluate(left, fromm, mid)
-			if left_val <= output:
-				continue
-			right_val = self.evaluate(right, mid, to)
-			output = max(min(right_val, left_val), output)
-			if output == 1.0:
+			second_val = self.evaluate(right, mid, to)
+			output = max(min(second_val, first_val), output)
+			if output == 1:
 				break
 		return output
 		
@@ -140,23 +146,23 @@ class Matcher:
 		if to == fromm:
 			return 1.0
 		output = self.segment_concat(prop, fromm, to)
-		self._refined_cache[prop, fromm, to] = output
+		self.add_refined_cache(prop, fromm, to, output)
 		return output
 
 	def eval_concat(self, prop: ConcatProp, fromm: int, to: int):
 		output = self.segment_concat(prop, fromm, to)
-		self._refined_cache[prop, fromm, to] = output
+		self.add_refined_cache(prop, fromm, to, output)
 		return output
 
 	def eval_union(self, prop: UnionProp, fromm: int, to: int):
 		first_val = self.evaluate(prop.left, fromm, to)
 		if first_val == 1.0:
-			self._refined_cache[prop, fromm, to] = 1.0
+			self.add_refined_cache(prop, fromm, to, 1.0)
 			return 1.0
 		second_val = self.evaluate(prop.right, fromm, to)
-		val = max(first_val, second_val)
-		self._refined_cache[prop, fromm, to] = val
-		return val
+		output = max(first_val, second_val)
+		self.add_refined_cache(prop, fromm, to, output)
+		return output
 
 	def match(self, frame):
 		self.oracle.add_frame(frame)

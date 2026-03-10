@@ -12,6 +12,7 @@ import ast
 import argparse
 import time
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 
 def read_boxes(file_path:str):
     f = open(file_path, 'r')
@@ -58,8 +59,13 @@ def load_raw_ecg_data(df, sampling_rate, path):
         data = [wfdb.rdsamp(path+f) for f in df.filename_lr]
     else:
         data = [wfdb.rdsamp(path+f) for f in df.filename_hr]
-    data = np.array([signal for signal, meta in data])
-    return data
+    data = data[:int(len(data)/2)]
+    num_samples = len(data)
+    sample_shape = data[0][0].shape # Assuming all signals are same shape
+    final_data = np.empty((num_samples, sample_shape[0]), dtype=np.float64)
+    for i, (signal, _) in enumerate(data):
+         final_data[i] = signal[:, 11]
+    return final_data 
 
 def load_ecg_data(sampling_rate = 100):
     path = '../PTB-XL/ptb-xl/'
@@ -67,8 +73,9 @@ def load_ecg_data(sampling_rate = 100):
     Y = pd.read_csv(path+'ptbxl_database.csv', index_col='ecg_id')
     Y.scp_codes = Y.scp_codes.apply(lambda x: ast.literal_eval(x))
     # Load raw signal data
+    columns = pd.read_csv(path+'ptbxl_database.csv')
     X = load_raw_ecg_data(Y, sampling_rate, path)
-    return X, Y
+    return X, columns['report']
 
 def match_moving(prop, query_map):
     dir_path = '../lyft-dataset/processed'
@@ -109,28 +116,56 @@ def match_strem(prop, query_map):
 
 def draw_sequence(trace, name):
      n_values = list(range(0, len(trace)))
-     plt.plot(n_values, trace, marker='o', linestyle='None', color='b', label=r'$a_n = n^2$')
+     plt.plot(n_values, trace, marker='o', linestyle='--', color='b', label=r'$a_n$')
      plt.xlabel('n (Index)')
      plt.ylabel(r'$a_n$ (Value)')
-     plt.xticks(n_values)  # Ensure all integer indices are shown
+     plt.xticks(n_values if len(n_values)>20 else n_values[::int(len(n_values)/20)+1])  # Ensure all integer indices are shown
+     ax = plt.gca() # Get current axes
+     ax.xaxis.set_major_locator(MaxNLocator(nbins=20)) 
      plt.grid(True, linestyle='--', alpha=0.7)
      plt.legend()
+     plt.tight_layout()
      plt.savefig(name+'.png')
+     plt.clf()
 
 def match_shapexp(prop, query_map):
-     X, _ = load_ecg_data()
-     trace = X[0, :, 11]
-     score = -1
+     X, reports = load_ecg_data(500)
      print("File","Score","QueryCount","Time")
-     start_time = time.perf_counter()
-     now_oracle = ShapeExpressionOracle(query_map, 0.02, 120)
-     matcher = Matcher(prop, now_oracle)
-     for frame in trace:
-        score = matcher.match(frame) 
-     end_time = time.perf_counter()
-     print("shape0",  score, now_oracle.query_count, end_time-start_time, sep=',')
+     for i in range(X.shape[0]):
+          report = reports[i].lower()
+          # if "left anterior fascicular block" not in report or "left axis deviation" not in report or "right bundle branch block" not in report:
+          #    continue
+          score = -1
+          trace = X[i, :500]
+          #print("Patient", i)
+          #draw_sequence(trace[:500], str(i))
+          start_time = time.time()
+          now_oracle = ShapeExpressionOracle(query_map, 0.96, 100)
+          matcher = Matcher(prop, now_oracle)
+          for frame in trace:
+               score = matcher.match(frame) 
+          end_time = time.time()
+          if score == 1:
+               print(i)
+               print(reports[i])
+          continue
+          print("shape0", i, score, now_oracle.query_count, end_time-start_time, sep=',')
+          #return matcher, trace
      
-shapexp_semres = ["[1-1]*[1-1]*^<10,50,e_inf_inf_0_inf_inf_10>[1-1]*^<10,50,e_inf_inf_inf_0_inf_10>[1-1]*^<10,50,l_0_inf_inf_inf>[1-1]*^<10,50,l_0_inf_inf_inf>[1-1]*^<10,50,l_inf_0_inf_inf>[1-1]*^<10,50,e_inf_inf_0_inf_inf_10>[1-1]*^<10,50,e_inf_inf_inf_0_inf_10>[1-1]*",
+def filter_matching_props(matcher: Matcher):
+     for key, val in matcher._refined_cache.items():
+          to_trues = set()
+          for to, output in val.items():
+               if output == 1:
+                    to_trues.add(to)
+          if len(to_trues)>0:
+               prop, fromm = key
+               print(prop.__str__(), fromm)
+               print(to_trues)
+               print()
+     #
+shapexp_semres = ["[1-1]*[10-30]^<10,30,l_0.01_inf_inf_inf>[10-30]^<10,30,l_inf_-0.01_inf_inf>[10-30]^<10,30,l_0.01_inf_inf_inf>[20-30]^<20,30,e_-3_3_inf_0_inf_0>[1-1]*",
+                  "[1-1]*[15-40]^<15,40,l_0.5_inf_inf_inf>[15-40]^<15,40,l_inf_-0.5_inf_inf>[20-100]^<20,100,e_-2_2_0_inf_inf_inf>[15-100]^<15,100,e_-2_2_inf_0_inf_inf>[1-1]*",
                   "[1-1]*[1-1]*^<10,30,l_inf_0.5_inf_inf>[1-1]*^<10,30,s_inf_inf_inf_inf_inf_inf_inf_inf>[1-1]*"]
 moving_semres = ["[1-1]*[10-20]^<10,20,car_pedestrian_close>[10-20][10-20]^<10,20,car_pedestrian_far>",
                 ]
@@ -154,8 +189,11 @@ else:
      parsed_tree = parser.parse(strem_semres[args.idx])
 builder = PropBuilder(parsed_tree)
 prop, query_map = builder.build_prop()
+matcher = None
+trace = None
 if args.type == "shapexp":
-     match_shapexp(prop, query_map)
+     matcher, trace = match_shapexp(prop, query_map)
+     #filter_matching_props(matcher)
 elif args.type == "moving":
      match_moving(prop, query_map)
 else:
