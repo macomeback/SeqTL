@@ -165,8 +165,7 @@ def filter_matching_props(matcher: Matcher):
                print()
      #
 shapexp_semres = ["[1-1]*[10-30]^<10,30,l_0.01_inf_inf_inf>[10-30]^<10,30,l_inf_-0.01_inf_inf>[10-30]^<10,30,l_0.01_inf_inf_inf>[20-30]^<20,30,e_-3_3_inf_0_inf_0>[1-1]*",
-                  "[1-1]*[15-40]^<15,40,l_0.5_inf_inf_inf>[15-40]^<15,40,l_inf_-0.5_inf_inf>[20-100]^<20,100,e_-2_2_0_inf_inf_inf>[15-100]^<15,100,e_-2_2_inf_0_inf_inf>[1-1]*",
-                  "[1-1]*[1-1]*^<10,30,l_inf_0.5_inf_inf>[1-1]*^<10,30,s_inf_inf_inf_inf_inf_inf_inf_inf>[1-1]*"]
+                  ]
 moving_semres = ["[1-1]*[10-20]^<10,20,car_pedestrian_close>[10-20][10-20]^<10,20,car_pedestrian_far>",
                 ]
 strem_semres = ["[1-1]*[1-1]^<1,1,~[emp](:pedestrian:&:bicycle:)>[1-1]*",
