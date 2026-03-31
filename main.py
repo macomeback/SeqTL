@@ -13,8 +13,9 @@ import argparse
 import time
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
+from motrackers import SORT
 
-def read_boxes(file_path:str):
+def read_boxes(file_path: str):
     f = open(file_path, 'r')
     data = json.load(f)
     traces = {}
@@ -24,6 +25,43 @@ def read_boxes(file_path:str):
                   traces[sample['channel']] = [] 
              traces[sample['channel']].append(sample)
     return traces
+
+def read_tracked_boxes(file_path: str):
+     traces = read_boxes(file_path)
+     tracked_traces = {}
+     for channel, trace in traces.items():
+          tracked_traces[channel] = track(trace)
+     return tracked_traces
+
+def track(trace):
+     tracker = SORT(max_lost=0, tracker_output_format='mot_challenge', iou_threshold=0.3)
+     tracked_trace = []
+     for frame in trace:
+          obj_num = len(frame['annotations'])
+          bboxes = np.zeros((obj_num, 4), 'float')
+          confidences = np.zeros((obj_num), 'float')
+          class_ids = np.zeros((obj_num), 'str')
+          for i in range(obj_num):
+               obj = frame['annotations'][i]
+               bbox = obj['bbox']['region']
+               w = bbox['dimensions']['w']
+               h = bbox['dimensions']['h']
+               x = bbox['center']['x']-w/2
+               y = bbox['center']['y']-h/2
+               bboxes[i, :] = np.array([x, y, w, h])
+               confidences[i] = obj['score']
+               class_ids[i] = obj['class']
+          output = tracker.update(bboxes, confidences, class_ids)
+          tracked_trace.append({})
+          for i in range(len(output)):
+               obj = output[i]
+               class_id = ""
+               for frame_obj in frame['annotations']:
+                    dims = frame_obj['bbox']['region']['dimensions']
+                    if obj[4] == dims['w'] and obj[5] == dims['h']:
+                         class_id = frame_obj['class']
+               tracked_trace[-1][obj[1]] = {'x': obj[2], 'y': obj[3], 'w': obj[4], 'h': obj[5], 'score': obj[6], 'class': class_id}
+     return tracked_trace
 
 parser = Lark(r"""
     start: OPENBASE SIGNED_NUMBER DASH SIGNED_NUMBER CLOSEBASE
@@ -84,8 +122,7 @@ def match_moving(prop, query_map):
             if 'sample' in file_name:
                  continue
             file_path = os.path.join(dir_path, file_name)
-            traces, labels = read_boxes(file_path)
-            labels_set = labels_set.union(labels)
+            traces = read_tracked_boxes(file_path)
             for channel, trace in traces.items():
                 start_time = time.perf_counter()
                 now_oracle = VideoOracle(query_map)
@@ -131,13 +168,12 @@ def draw_sequence(trace, name):
 def match_shapexp(prop, query_map):
      X, reports = load_ecg_data(500)
      print("File","Score","QueryCount","Time")
-     for i in range(X.shape[0]):
+     for i in range(7140, X.shape[0], 20):
           report = reports[i].lower()
           # if "left anterior fascicular block" not in report or "left axis deviation" not in report or "right bundle branch block" not in report:
           #    continue
           score = -1
-          trace = X[i, :500]
-          #print("Patient", i)
+          trace = X[i, :]
           #draw_sequence(trace[:500], str(i))
           start_time = time.time()
           now_oracle = ShapeExpressionOracle(query_map, 0.96, 100)
@@ -145,11 +181,9 @@ def match_shapexp(prop, query_map):
           for frame in trace:
                score = matcher.match(frame) 
           end_time = time.time()
-          if score == 1:
-               print(i)
-               print(reports[i])
-          continue
-          print("shape0", i, score, now_oracle.query_count, end_time-start_time, sep=',')
+          if score:
+               print(report)
+          print(i, score, now_oracle.query_count, end_time-start_time, sep=',')
           #return matcher, trace
      
 def filter_matching_props(matcher: Matcher):
@@ -166,7 +200,7 @@ def filter_matching_props(matcher: Matcher):
      #
 shapexp_semres = ["[1-1]*[10-30]^<10,30,l_0.01_inf_inf_inf>[10-30]^<10,30,l_inf_-0.01_inf_inf>[10-30]^<10,30,l_0.01_inf_inf_inf>[20-30]^<20,30,e_-3_3_inf_0_inf_0>[1-1]*",
                   ]
-moving_semres = ["[1-1]*[10-20]^<10,20,car_pedestrian_close>[10-20][10-20]^<10,20,car_pedestrian_far>",
+moving_semres = ["[1-1]*[5-100]^<5,100,car_pedestrian_1.1>[1-1]*",
                 ]
 strem_semres = ["[1-1]*[1-1]^<1,1,~[emp](:pedestrian:&:bicycle:)>[1-1]*",
                 "[1-1]*[1-1]^<1,1,~[emp](:pedestrian:&:car:)>([1-1]^<1,1,~[emp](:pedestrian:&:car:)>)*[1-1]^<1,1,:pedestrian:[and]([emp](:pedestrian:&:car:))>([1-1]^<1,1,:pedestrian:[and]([emp](:pedestrian:&:car:))>)*[1-1]^<1,1,~[emp](:pedestrian:&:car:)>([1-1]^<1,1,~[emp](:pedestrian:&:car:)>)*[1-1]*",
@@ -191,7 +225,7 @@ prop, query_map = builder.build_prop()
 matcher = None
 trace = None
 if args.type == "shapexp":
-     matcher, trace = match_shapexp(prop, query_map)
+     match_shapexp(prop, query_map)
      #filter_matching_props(matcher)
 elif args.type == "moving":
      match_moving(prop, query_map)

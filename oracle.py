@@ -337,106 +337,57 @@ class VideoOracle:
 	def _fill_queries(self, query_map):
 		for query_str, query_id in query_map.items():
 			self._queries[query_id] = query_str.split("_")
-	
-	def get_type_bucket(self):
-		type_bucket = {}
-		for obj in self.trace[-1]:
-			obj_type = obj['class']
-			if obj_type not in type_bucket:
-				type_bucket[obj_type] = []
-			type_bucket[obj_type].append(obj)
-		return type_bucket
-	
-	def get_distance(self, obj1, obj2) -> float:
-		center1 = obj1['bbox']['region']['center']
-		center2 = obj2['bbox']['region']['center']
-		x1 = center1['x']
-		y1 = center1['y']
-		x2 = center2['x']
-		y2 = center2['y']
-		return (x1-x2)**2+(y1-y2)**2
-
-	def getting_closer(self, fromm: int, to: int, type1, type2) -> float:
-		last_dist = -1
-		min_score = -1
-		init_dist = -1
-		for i in range(fromm, to):
-			if type1 not in self.type_buckets[i] or type2 not in self.type_buckets[i]:
-				return 0.0
-			bucket1 = self.type_buckets[i][type1]
-			bucket2 = self.type_buckets[i][type2]
-			if type1==type2 and (len(bucket1)==1 or len(bucket2)==1):
-				return 0.0
-			dist, score = self.get_min_dist(bucket1, bucket2)
-			if i == fromm:
-				last_dist = dist
-				init_dist = dist
-				min_score = score
-			elif last_dist > 1.05*dist:
-				return 0.0
-			else:
-				last_dist = dist
-				min_score = min(score, min_score)
-		if init_dist*0.95>last_dist:
-			return min_score
-		return 0.0
-	
-	
-	def get_min_dist(self, bucket1, bucket2):
-		min_dist = -1
-		score = -1
-		for i in range(len(bucket1)):
-			for j in range(len(bucket2)):
-				if bucket1[i] != bucket2[j]:
-					dist = self.get_distance(bucket1[i], bucket2[j])
-					ij_score = min(bucket1[i]['score'], bucket2[j]['score'])
-					if min_dist<0:
-						min_dist = dist
-						score = ij_score
-					else:
-						min_dist = min(min_dist, dist)
-						score = min(score, ij_score)
-		return min_dist, score
-
-	
-	def getting_further(self, fromm: int, to: int, type1, type2) -> float:
-		last_dist = -1
-		min_score = -1
-		init_dist = -1
-		for i in range(fromm, to+1):
-			if type1 not in self.type_buckets[i] or type2 not in self.type_buckets[i]:
-				return 0.0
-			bucket1 = self.type_buckets[i][type1]
-			bucket2 = self.type_buckets[i][type2]
-			if type1==type2 and (len(bucket1)==1 or len(bucket2)==1):
-				return 0.0
-			dist, score = self.get_min_dist(bucket1, bucket2)
-			if i == fromm:
-				last_dist = dist
-				init_dist = dist
-				min_score = score
-			elif last_dist < 0.95*dist:
-				return 0.0
-			else:
-				last_dist = dist
-				min_score = min(score, min_score)
-		if init_dist*1.05<last_dist:
-			return min_score
-		return 0.0
 			
 	def add_frame(self, frame):
-		self.trace.append(frame['annotations'])
-		self.type_buckets.append(self.get_type_bucket())
+		self.trace.append(frame)
+
+	def _get_area(self, obj):
+		return obj['w']*obj['h']
+
+	def _get_sum_ratios(self, trace, ids):
+		ratios = {id: 0 for id in ids}
+		for i in range(1, len(trace)):
+			for id in ids:
+				if ratios[id] == -1 or id not in trace[i] or id not in trace[i-1]:
+					ratios[id] = -1
+				else:
+					area_now = self._get_area(trace[i][id])
+					area_prev = self._get_area(trace[i-1][id])
+					ratios[id] = ratios[id]+area_now/area_prev
+		return ratios
+	
+	def _exceeds_ratio(self, n1: float, n2: float, min_ratio: float):
+		return n1>0 and n2>0 and (n1/n2>=min_ratio or n2/n1>=min_ratio) 
+	
+	def _get_score(self, trace, id):
+		score = trace[0][id]['score']
+		for frame in trace:
+			score = min(score, frame[id]['score'])
+		return score
+
+	def _velocity_min_ratio_exists(self, trace, class_id1: str, class_id2: str, min_ratio: float):
+		if len(trace)<2:
+			return 0
+		class1_objs = [id for id, val in trace[0].items() if val['class']==class_id1]
+		class2_objs = [id for id, val in trace[0].items() if val['class']==class_id2]
+		if len(class1_objs) == 0 or len(class2_objs) == 0:
+			return 0
+		ratios1 = self._get_sum_ratios(trace, class1_objs)
+		ratios2 = self._get_sum_ratios(trace, class2_objs)
+		ratio = 0
+		for id1 in class1_objs:
+			for id2 in class2_objs:
+				if id1 != id2 and self._exceeds_ratio(ratios1[id1], ratios2[id2], min_ratio):
+					ratio = max(min(self._get_score(trace, id1), self._get_score(trace, id2)), ratio)
+		return ratio
+
 			
 	def compute(self, query_id: int, fromm: int, to: int) -> float:
 		if (query_id, fromm, to) in self._cache:
 			return self._cache[query_id, fromm, to]
 		self.query_count += 1
 		query_parts = self._queries[query_id]
-		if "close" == query_parts[2]:
-			output = self.getting_closer(fromm, to, query_parts[0], query_parts[1])
-		else:
-			output = self.getting_further(fromm, to, query_parts[0], query_parts[1])
+		output = self._velocity_min_ratio_exists(self.trace[fromm:to], query_parts[0], query_parts[1], float(query_parts[2]))
 		self._cache[query_id, fromm, to] = output
 		return output
 

@@ -86,6 +86,8 @@ class Matcher:
 		if (prop, fromm) in self._refined_cache and to in self._refined_cache[prop, fromm]:
 			return self._refined_cache[prop, fromm][to]
 		return None
+	
+
 		
 	def evaluate(self, prop: SeqTLProp, fromm: int, to: int): # fromm inclusive, to exclusive
 		cache_result = self.check_cache(prop, fromm, to)
