@@ -74,8 +74,7 @@ def load_raw_ecg_data(df, sampling_rate, path):
          final_data[i] = signal[:, 11]
     return final_data 
 
-def load_ecg_data(sampling_rate = 100):
-    path = '../PTB-XL/ptb-xl/'
+def load_ecg_data(path, sampling_rate = 100):
     # load and convert annotation data
     Y = pd.read_csv(path+'ptbxl_database.csv', index_col='ecg_id')
     Y.scp_codes = Y.scp_codes.apply(lambda x: ast.literal_eval(x))

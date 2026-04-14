@@ -38,9 +38,8 @@ parser = Lark(r"""
 
     """, start='start')
 
-
-def match_moving(prop, query_map):
-    dir_path = '../lyft-dataset/processed'
+# path = ../lyft-dataset/processed
+def match_moving(prop, query_map, dir_path):
     print("File", "Channel", "Score", "QueryCount", "Time", sep=',')        
     for file_name in os.listdir(dir_path):
             if 'sample' in file_name:
@@ -56,9 +55,9 @@ def match_moving(prop, query_map):
                     score = matcher.match(frame)
                 end_time = time.perf_counter()
                 print(file_name[:4], channel, score, now_oracle.query_count, end_time-start_time, sep=',')
-    
-def match_strem(prop, query_map):
-    dir_path = '../lyft-dataset/processed'
+
+# path = ../lyft-dataset/processed  
+def match_strem(prop, query_map, dir_path):
     print("File", "Channel", "Score", "QueryCount", "Time", sep=',')  
     for file_name in os.listdir(dir_path):
             if 'sample' in file_name:
@@ -75,9 +74,10 @@ def match_strem(prop, query_map):
                 end_time = time.perf_counter()
                 print(file_name[:4], channel, score, now_oracle.query_count, end_time-start_time, sep=',')
 
-def match_ecg(prop, query_map):
-     X, reports = load_ecg_data(500)
-     #print("File","Score","QueryCount","Time")
+# Path: ../PTB-XL/ptb-xl/
+def match_ecg(prop, query_map, path):
+     X, reports = load_ecg_data(path, 500)
+     print("File","Score","QueryCount","Time",sep=',')
      for i in range(0, X.shape[0], 20):
           report = reports[i].lower()
           # if "left anterior fascicular block" not in report or "left axis deviation" not in report or "right bundle branch block" not in report:
@@ -96,17 +96,21 @@ def match_ecg(prop, query_map):
           print(i, score, now_oracle.query_count, end_time-start_time, sep=',')
           #return matcher, trace
 
-def match_aircraft(prop, query_map):
-     trace = pd.read_csv('../aircraft_data/data3.csv')['0.1'].to_numpy()
-     score = -1
-     print("Score","QueryCount","Time")
-     start_time = time.time()
-     now_oracle = ShapeExpressionOracle(query_map, 0.96, 100)
-     matcher = Matcher(prop, now_oracle)
-     for frame in trace:
-          score = matcher.match(frame) 
-     end_time = time.time()
-     print(score, now_oracle.query_count, end_time-start_time, sep=',')
+# Path = ../aircraft_aggregate/? 
+def match_aircraft(prop, query_map, dir_path):
+     print("File", "Score", "QueryCount", "Time", sep=',')  
+     for file_name in os.listdir(dir_path):
+          file_path = os.path.join(dir_path, file_name)
+          df = pd.read_csv(file_path)
+          trace = df[df.keys()[1]].to_numpy()
+          score = -1
+          start_time = time.time()
+          now_oracle = ShapeExpressionOracle(query_map, 0.96, 100)
+          matcher = Matcher(prop, now_oracle)
+          for frame in trace:
+               score = matcher.match(frame) 
+          end_time = time.time()
+          print(file_name, score, now_oracle.query_count, end_time-start_time, sep=',')
      #
 ecg_semres = ["[1-1]*[10-30]^<10,30,l_0.01_inf_inf_inf>[10-30]^<10,30,l_inf_-0.01_inf_inf>[10-30]^<10,30,l_0.01_inf_inf_inf>[20-30]^<20,30,e_-3_3_inf_0_inf_0>[1-1]*"]
 aircraft_semres = ["[1-1]*[30-75]^<30,75,l_0.5_inf_inf_inf>[150-250]^<150,250,s_inf_inf_inf_inf_inf_inf_inf_inf>[1-1]*"]
@@ -122,6 +126,7 @@ strem_semres = ["[1-1]*[1-1]^<1,1,~[emp](:pedestrian:&:bicycle:)>[1-1]*",
 argparser = argparse.ArgumentParser()
 argparser.add_argument("type", type=str)
 argparser.add_argument("idx", type=int)
+argparser.add_argument("path", type=str)
 args = argparser.parse_args()
 parsed_tree = None
 if args.type == "ecg":
@@ -137,13 +142,13 @@ prop, query_map = builder.build_prop()
 matcher = None
 trace = None
 if args.type == "ecg":
-     match_ecg(prop, query_map)
+     match_ecg(prop, query_map, args.path)
 elif args.type == "aircraft":
-     match_aircraft(prop, query_map)
+     match_aircraft(prop, query_map, args.path)
 elif args.type == "moving":
-     match_moving(prop, query_map)
+     match_moving(prop, query_map, args.path)
 elif args.type == "strem":
-     match_strem(prop, query_map)
+     match_strem(prop, query_map, args.path)
 #print(parsed_tree.pretty())
 #f = open('418_C_BBB_101_9s_full.csv', 'r')
 
