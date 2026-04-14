@@ -1,5 +1,4 @@
 from prop import *
-import time
 
 class Matcher:
 	def __init__(self, prop: SeqTLProp, oracle):
@@ -86,8 +85,6 @@ class Matcher:
 		if (prop, fromm) in self._refined_cache and to in self._refined_cache[prop, fromm]:
 			return self._refined_cache[prop, fromm][to]
 		return None
-	
-
 		
 	def evaluate(self, prop: SeqTLProp, fromm: int, to: int): # fromm inclusive, to exclusive
 		cache_result = self.check_cache(prop, fromm, to)
@@ -134,7 +131,7 @@ class Matcher:
 		mid_from = max(mid_from, fromm+left.lb, to-right.ub if right.ub != float('inf') else mid_from)
 		mid_to = min(to, fromm+left.ub, to-right.lb)
 		output = 0.0
-		for mid in range(mid_from, mid_to):
+		for mid in range(mid_from, mid_to+1):
 			first_val = self.evaluate(left, fromm, mid)
 			if first_val <= output:
 				continue

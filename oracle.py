@@ -1,26 +1,13 @@
 import random
 import numpy as np
 import warnings
-#import torch
-#from numpy.typing import NDArray, Shape
 from lark import Lark
 from strem.builder import build_formula
 from strem.evaluator import Evaluator
 from lmfit.models import Model
 import random
-import matplotlib.pyplot as plt
 from scipy.optimize import lsq_linear
-
-def draw_sequence2(trace, name):
-	n_values = list(range(0, len(trace)))
-	plt.plot(n_values, trace, marker='o', linestyle='None', color='b', label=r'$a_n$')
-	plt.xlabel('n (Index)')
-	plt.ylabel(r'$a_n$ (Value)')
-	plt.xticks(n_values)  
-	plt.grid(True, linestyle='--', alpha=0.7)
-	plt.legend()
-	plt.savefig(name+'.png')
-	plt.clf()
+from scipy.signal import find_peaks
 
 strem_parser = Lark(r"""
     formula: ATOM
@@ -263,6 +250,37 @@ class ShapeExpressionOracle:
 			return True
 		return False
 	
+	def get_sinc_coeffs(self, trace):
+		a = np.mean(trace[-10:])
+		b = np.max(trace)-a
+		peaks = find_peaks(trace, distance=10)
+		c = np.mean(peaks[1:]-peaks[:-1])
+		d = -peaks[0]*c
+		return a,b,c,d
+
+	def sinc_match(self, fromm, to, query_id) -> bool:
+		_, lb_list, ub_list = self._queries[query_id]
+		trace = self.trace[fromm: to]
+		x = self._current_x[:len(trace)]
+		if self.incremental_check(fromm, to, x[-1], query_id):
+			return True
+		coeffs = self.get_sinc_coeffs(trace)
+		if coeffs is None or not self.check_bounds(lb_list, ub_list, *coeffs):
+			return False
+		a, b, c, d = coeffs
+		model = self.get_model(self.exp, lb_list, ub_list, a, b, c, d)
+		result = model.fit(trace, t=x)
+		if result.rsquared<self._threshold:
+			return False
+		best_vals = result.params
+		a, b, c, d = float(best_vals['a']), float(best_vals['b']), float(best_vals['c']), float(best_vals['d'])
+		mean = self.get_trace_mean(fromm, to)
+		pred = self.sinc(x, a, b, c, d)
+		res, tot = self.r2sq(trace-pred, trace, mean)
+		self._params[query_id, fromm, to] = a, b, c
+		self._r2[query_id, fromm, to] = res, tot
+		return True
+	
 	def get_model(self, func, lb_list, ub_list, *params_initial):
 		model = Model(func)
 		params = model.make_params()
@@ -420,7 +438,6 @@ class StremOracle:
 			output = 1.0
 			for i in range(fromm, to):
 				output = min(output, self.compute(query_id, i, i+1))
-			return output
 		else:
 			self.query_count += 1
 			formula = self._queries[query_id]

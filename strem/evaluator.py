@@ -40,7 +40,9 @@ class Evaluator:
             return self.eval(formula.left) and self.eval(formula.right)
         if formula_type == Or:
             return self.eval(formula.left) or self.eval(formula.right)
-        return self.eval_exp(formula.left) <= self.eval_exp(formula.right)
+        if formula_type == LEQ:
+            return self.eval_exp(formula.left) <= self.eval_exp(formula.right)
+        return None
 
     def eval_exp(self, exp: MetricExpression) -> float:
         exp_type = type(exp)
@@ -58,7 +60,8 @@ class Evaluator:
             return self.eval_exp(exp.left)+self.eval_exp(exp.right)
         if exp_type == Mul:
             return self.eval_exp(exp.left)*self.eval_exp(exp.right)
-        return self.eval_exp(exp.child)**exp.exponent
+        if exp_type == Exp:
+            return self.eval_exp(exp.child)**exp.exponent
         
     def eval_distance(self, exp: Dist):
         center1 = self.eval_term(exp.first)
@@ -80,7 +83,9 @@ class Evaluator:
             return self._universe.difference(self.eval_term(term.child))
         if term_type == Union:
             return shapely.union(self.eval_term(term.left), self.eval_term(term.right))
-        return shapely.intersection(self.eval_term(term.left), self.eval_term(term.right))
+        if term_type == Intersection:
+            return shapely.intersection(self.eval_term(term.left), self.eval_term(term.right))
+        return None
         
     def eval_atom_boxes(self, name: str):
         shape = Polygon()
