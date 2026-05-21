@@ -6,3 +6,4 @@ wfdb
 motrackers
 lmfit
 scipy
+shapely
