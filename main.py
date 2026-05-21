@@ -8,6 +8,7 @@ import pandas as pd
 import argparse
 import time
 from data_handler import read_boxes, read_tracked_boxes, load_ecg_data
+import numpy as np
 
 parser = Lark(r"""
     start: OPENBASE SIGNED_NUMBER DASH SIGNED_NUMBER CLOSEBASE
@@ -74,27 +75,35 @@ def match_strem(prop, query_map, dir_path):
                 end_time = time.perf_counter()
                 print(file_name[:4], channel, score, now_oracle.query_count, end_time-start_time, sep=',')
 
+def sample_from(X, start_range: int, end_range: int, num_samples: int):
+     X = X[start_range: end_range, :]
+     X_indices = np.array([i for i in range(start_range, end_range)])
+     shuffled_indices = np.random.permutation(len(X))
+     X = X[shuffled_indices]
+     X_indices = X_indices[shuffled_indices]
+     return X[:num_samples], X_indices[:num_samples]
+
 # Path: ../PTB-XL/ptb-xl/
 def match_ecg(prop, query_map, path):
-     X, reports = load_ecg_data(path, 500)
+     inputs = input("Enter start range, end range and number of samples separated by space.\n").split(" ")
+     start_range: int = int(inputs[0])
+     end_range: int = int(inputs[1])
+     num_samples: int = int(inputs[2])
+     X = load_ecg_data(path, 500)
+     X, X_indices = sample_from(X, start_range, end_range, num_samples)
      print("File","Score","QueryCount","Time",sep=',')
-     for i in range(0, X.shape[0], 20):
-          report = reports[i].lower()
-          # if "left anterior fascicular block" not in report or "left axis deviation" not in report or "right bundle branch block" not in report:
-          #    continue
+     for i in range(X.shape[0]):
           score = -1
           trace = X[i, :]
-          #draw_sequence(trace[:500], str(i))
-          start_time = time.time()
-          now_oracle = ShapeExpressionOracle(query_map, 0.96, 100)
-          matcher = Matcher(prop, now_oracle)
-          for frame in trace:
-               score = matcher.match(frame) 
-          end_time = time.time()
-          if score:
-               print(report)
-          print(i, score, now_oracle.query_count, end_time-start_time, sep=',')
-          #return matcher, trace
+          for should_optimize in [True, False]:
+               start_time = time.time()
+               now_oracle = ShapeExpressionOracle(query_map, 0.96, 100, should_optimize)
+               matcher = Matcher(prop, now_oracle)
+               for frame in trace:
+                    score = matcher.match(frame) 
+               end_time = time.time()
+               optimize_flag = "-o" if should_optimize else "-n"
+               print(f"{X_indices[i]}{optimize_flag}", score, now_oracle.query_count, end_time-start_time, sep=',')
 
 # Path = ../aircraft_aggregate/? 
 def match_aircraft(prop, query_map, dir_path):

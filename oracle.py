@@ -81,7 +81,7 @@ class RandomOracle:
 		return response
 	
 class ShapeExpressionOracle:
-	def __init__(self, query_map: dict[str, int], threshold: float, scale_factor):
+	def __init__(self, query_map: dict[str, int], threshold: float, scale_factor: float, should_optimize: bool):
 		warnings.filterwarnings("ignore", category=FutureWarning, module="uncertainties")
 		self._queries: list = [None]*len(query_map)
 		self._threshold = threshold
@@ -95,6 +95,8 @@ class ShapeExpressionOracle:
 		self._r2 = {}
 		self._funcs = {"e": self.exp, "l": self.lin, "s": self.sinc}
 		self.scale_factor = scale_factor
+		self.already_asked = set()
+		self.should_optimize = should_optimize
 
 	def _fill_queries(self, query_map):
 		for query_str, query_id in query_map.items():
@@ -121,6 +123,9 @@ class ShapeExpressionOracle:
 
 	def compute(self, query_id: int, fromm: int, to: int) -> bool:
 		first_true_to = last_true_to = first_false_to = float('inf')
+		if (query_id, fromm, to) not in self.already_asked:
+			self.query_count+=1
+			self.already_asked.add((query_id, fromm, to))
 		if (query_id, fromm) in self._cache:
 			first_true_to, last_true_to, first_false_to = self._cache[query_id, fromm]
 			if first_false_to != float('inf'):
@@ -130,7 +135,8 @@ class ShapeExpressionOracle:
 					return True
 			elif to>= first_true_to and to <= last_true_to:
 				return True
-		self.query_count += 1
+		if not self.should_optimize:
+			return self.atomic_match(fromm, to, query_id)
 		fromm_range, to_range = self.calculate_incremental_range(first_true_to, last_true_to, first_false_to, to)
 		result = False
 		final_result = False
@@ -176,7 +182,7 @@ class ShapeExpressionOracle:
 		_, lb_list, ub_list = self._queries[query_id]
 		trace = self.trace[fromm: to]
 		x = self._current_x[:len(trace)]/self.scale_factor
-		if self.incremental_check(fromm, to, x[-1], query_id):
+		if self.should_optimize and self.incremental_check(fromm, to, x[-1], query_id):
 			return True
 		coeffs = self.get_exp_coeffs_integral(trace, x)
 		if coeffs is None or not self.check_bounds(lb_list, ub_list, *coeffs):
@@ -234,7 +240,7 @@ class ShapeExpressionOracle:
 		_, lb_list, ub_list = self._queries[query_id]
 		trace = self.trace[fromm: to]
 		x = self._current_x[:len(trace)]
-		if self.incremental_check(fromm, to, x[-1], query_id):
+		if self.should_optimize and self.incremental_check(fromm, to, x[-1], query_id):
 			return True
 		A = np.column_stack([x, np.ones_like(x)])
 		res = lsq_linear(A, trace, bounds=(lb_list, ub_list))
@@ -262,7 +268,7 @@ class ShapeExpressionOracle:
 		_, lb_list, ub_list = self._queries[query_id]
 		trace = self.trace[fromm: to]
 		x = self._current_x[:len(trace)]
-		if self.incremental_check(fromm, to, x[-1], query_id):
+		if self.should_optimzie and self.incremental_check(fromm, to, x[-1], query_id):
 			return True
 		coeffs = self.get_sinc_coeffs(trace)
 		if coeffs is None or not self.check_bounds(lb_list, ub_list, *coeffs):

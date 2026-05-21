@@ -62,27 +62,23 @@ def track(trace):
      return tracked_trace
 
 def load_raw_ecg_data(df, sampling_rate, path):
-    if sampling_rate == 100:
-        data = [wfdb.rdsamp(path+f) for f in df.filename_lr]
-    else:
-        data = [wfdb.rdsamp(path+f) for f in df.filename_hr]
+    names = df.filename_lr.sort_values() if sampling_rate == 100 else df.filename_hr.sort_values()
+    data = [wfdb.rdsamp(path+f) for f in names]
     data = data[:int(len(data)/2)]
     num_samples = len(data)
     sample_shape = data[0][0].shape # Assuming all signals are same shape
     final_data = np.empty((num_samples, sample_shape[0]), dtype=np.float64)
     for i, (signal, _) in enumerate(data):
          final_data[i] = signal[:, 11]
-    return final_data 
+    return final_data
 
 def load_ecg_data(path, sampling_rate = 100):
     # load and convert annotation data
     Y = pd.read_csv(path+'ptbxl_database.csv', index_col='ecg_id')
     Y.scp_codes = Y.scp_codes.apply(lambda x: ast.literal_eval(x))
     # Load raw signal data
-    columns = pd.read_csv(path+'ptbxl_database.csv')
-    X = load_raw_ecg_data(Y, sampling_rate, path)
-    return X, columns['report']
-
+    #columns = pd.read_csv(path+'ptbxl_database.csv')
+    return load_raw_ecg_data(Y, sampling_rate, path)
 
 def draw_sequence(trace, name):
      n_values = list(range(0, len(trace)))
