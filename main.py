@@ -107,7 +107,7 @@ def match_ecg(prop, query_map, path):
 
 # Path = ../aircraft_aggregate/? 
 def match_aircraft(prop, query_map, dir_path):
-     print("File", "Score", "QueryCount", "Time", sep=',')  
+     print("File", "Score", "QueryCount", "OracleTime", "Time", sep=',')  
      for file_name in os.listdir(dir_path):
           file_path = os.path.join(dir_path, file_name)
           df = pd.read_csv(file_path)
@@ -119,7 +119,7 @@ def match_aircraft(prop, query_map, dir_path):
           for frame in trace:
                score = matcher.match(frame) 
           end_time = time.time()
-          print(file_name, score, now_oracle.query_count, end_time-start_time, sep=',')
+          print(file_name, score, now_oracle.query_count, matcher.oracle_time, end_time-start_time, sep=',')
      #
 ecg_semres = ["[1-1]*[10-30]^<10,30,l_0.01_inf_inf_inf>[10-30]^<10,30,l_inf_-0.01_inf_inf>[10-30]^<10,30,l_0.01_inf_inf_inf>[20-30]^<20,30,e_-3_3_inf_0_inf_0>[1-1]*"]
 aircraft_semres = ["[1-1]*[30-75]^<30,75,l_0.5_inf_inf_inf>[150-250]^<150,250,s_inf_inf_inf_inf_inf_inf_inf_inf>[1-1]*"]
