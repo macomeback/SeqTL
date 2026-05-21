@@ -137,6 +137,9 @@ argparser.add_argument("type", type=str)
 argparser.add_argument("idx", type=int)
 argparser.add_argument("path", type=str)
 args = argparser.parse_args()
+arg_path = args.path
+if arg_path[len(arg_path)-1] != '/':
+     arg_path = arg_path+'/'
 parsed_tree = None
 if args.type == "ecg":
      parsed_tree = parser.parse(ecg_semres[args.idx])
