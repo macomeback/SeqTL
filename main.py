@@ -154,13 +154,13 @@ prop, query_map = builder.build_prop()
 matcher = None
 trace = None
 if args.type == "ecg":
-     match_ecg(prop, query_map, args.path)
+     match_ecg(prop, query_map, arg_path)
 elif args.type == "aircraft":
-     match_aircraft(prop, query_map, args.path)
+     match_aircraft(prop, query_map, arg_path)
 elif args.type == "moving":
-     match_moving(prop, query_map, args.path)
+     match_moving(prop, query_map, arg_path)
 elif args.type == "strem":
-     match_strem(prop, query_map, args.path)
+     match_strem(prop, query_map, arg_path)
 #print(parsed_tree.pretty())
 #f = open('418_C_BBB_101_9s_full.csv', 'r')
 
