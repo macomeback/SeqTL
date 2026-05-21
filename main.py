@@ -41,7 +41,7 @@ parser = Lark(r"""
 
 # path = ../lyft-dataset/processed
 def match_moving(prop, query_map, dir_path):
-    print("File", "Channel", "Score", "QueryCount", "Time", sep=',')        
+    print("File", "Channel", "Score", "QueryCount", "OracleTime", "Time", sep=',')        
     for file_name in os.listdir(dir_path):
             if 'sample' in file_name:
                  continue
@@ -55,11 +55,11 @@ def match_moving(prop, query_map, dir_path):
                 for frame in trace:    
                     score = matcher.match(frame)
                 end_time = time.perf_counter()
-                print(file_name[:4], channel, score, now_oracle.query_count, end_time-start_time, sep=',')
+                print(file_name[:4], channel, score, now_oracle.query_count, matcher.oracle_time, end_time-start_time, sep=',')
 
 # path = ../lyft-dataset/processed  
 def match_strem(prop, query_map, dir_path):
-    print("File", "Channel", "Score", "QueryCount", "Time", sep=',')  
+    print("File", "Channel", "Score", "QueryCount", "OracleTime" "Time", sep=',')  
     for file_name in os.listdir(dir_path):
             if 'sample' in file_name:
                  continue
@@ -73,7 +73,7 @@ def match_strem(prop, query_map, dir_path):
                 for frame in trace: 
                     score = matcher.match(frame)
                 end_time = time.perf_counter()
-                print(file_name[:4], channel, score, now_oracle.query_count, end_time-start_time, sep=',')
+                print(file_name[:4], channel, score, now_oracle.query_count, matcher.oracle_time, end_time-start_time, sep=',')
 
 def sample_from(X, start_range: int, end_range: int, num_samples: int):
      X = X[start_range: end_range, :]
@@ -91,7 +91,7 @@ def match_ecg(prop, query_map, path):
      num_samples: int = int(inputs[2])
      X = load_ecg_data(path, 500)
      X, X_indices = sample_from(X, start_range, end_range, num_samples)
-     print("File","Score","QueryCount","Time",sep=',')
+     print("File","Score","QueryCount", "OracleTime" ,"Time",sep=',')
      for i in range(X.shape[0]):
           score = -1
           trace = X[i, :]
@@ -103,7 +103,7 @@ def match_ecg(prop, query_map, path):
                     score = matcher.match(frame) 
                end_time = time.time()
                optimize_flag = "-o" if should_optimize else "-n"
-               print(f"{X_indices[i]}{optimize_flag}", score, now_oracle.query_count, end_time-start_time, sep=',')
+               print(f"{X_indices[i]}{optimize_flag}", score, now_oracle.query_count, matcher.oracle_time, end_time-start_time, sep=',')
 
 # Path = ../aircraft_aggregate/? 
 def match_aircraft(prop, query_map, dir_path):

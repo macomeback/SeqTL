@@ -1,4 +1,5 @@
 from prop import *
+import time
 
 class Matcher:
 	def __init__(self, prop: SeqTLProp, oracle):
@@ -13,6 +14,7 @@ class Matcher:
 		for prop in self._refine_frees:
 			self._refine_frees_cache[prop] = set()
 		self.refine_free_update_all(0)
+		self.oracle_time = 0
 
 	def refine_free_update_all(self, length: int):
 		for prop in self._refine_frees:
@@ -112,7 +114,11 @@ class Matcher:
 		if child_val == 0.0:
 			self.add_refined_cache(prop, fromm, to, 0.0)
 			return 0.0
-		output = min(self.oracle.compute(prop.query_id, fromm, to), child_val)
+		start_time = time.time()
+		oracle_val = self.oracle.compute(prop.query_id, fromm, to)
+		end_time = time.time()
+		self.oracle_time += (end_time-start_time)
+		output = min(oracle_val, child_val)
 		self.add_refined_cache(prop, fromm, to, output)
 		return output
 	
