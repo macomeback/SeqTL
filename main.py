@@ -59,7 +59,7 @@ def match_moving(prop, query_map, dir_path):
 
 # path = ../lyft-dataset/processed  
 def match_strem(prop, query_map, dir_path):
-    print("File", "Channel", "Score", "QueryCount", "OracleTime" "Time", sep=',')  
+    print("File", "Channel", "Score", "QueryCount", "OracleTime", "Time", sep=',')  
     for file_name in os.listdir(dir_path):
             if 'sample' in file_name:
                  continue
