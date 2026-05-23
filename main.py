@@ -113,14 +113,16 @@ def match_aircraft(prop, query_map, dir_path):
           df = pd.read_csv(file_path)
           trace = df[df.keys()[1]].to_numpy()
           score = -1
-          start_time = time.time()
-          now_oracle = ShapeExpressionOracle(query_map, 0.96, 100)
-          matcher = Matcher(prop, now_oracle)
-          for frame in trace:
-               score = matcher.match(frame) 
-          end_time = time.time()
-          print(file_name, score, now_oracle.query_count, matcher.oracle_time, end_time-start_time, sep=',')
-     #
+          for should_optimize in [True, False]:
+               start_time = time.time()
+               now_oracle = ShapeExpressionOracle(query_map, 0.96, 100, should_optimize)
+               matcher = Matcher(prop, now_oracle)
+               for frame in trace:
+                    score = matcher.match(frame) 
+               end_time = time.time()
+               optimize_flag = "-o" if should_optimize else "-n"
+               print(f"{file_name}{optimize_flag}", score, now_oracle.query_count, matcher.oracle_time, end_time-start_time, sep=',')
+
 ecg_semres = ["[1-1]*[10-30]^<10,30,l_0.01_inf_inf_inf>[10-30]^<10,30,l_inf_-0.01_inf_inf>[10-30]^<10,30,l_0.01_inf_inf_inf>[20-30]^<20,30,e_-3_3_inf_0_inf_0>[1-1]*"]
 aircraft_semres = ["[1-1]*[30-75]^<30,75,l_0.5_inf_inf_inf>[150-250]^<150,250,s_inf_inf_inf_inf_inf_inf_inf_inf>[1-1]*"]
 moving_semres = ["[1-1]*[5-100]^<5,100,car_pedestrian_1.1>[1-1]*",
