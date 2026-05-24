@@ -115,17 +115,14 @@ class ShapeExpressionOracle:
 					ub_list.append(float(parts[i]))
 			self._queries[query_id] = (parts[0], lb_list, ub_list)
 
-	def calculate_incremental_range(self, first_true_to, last_true_to, first_false_to, to):
-		if to>last_true_to and first_false_to == float('inf'):
-			return last_true_to+1, to+1
-		to_range = min(first_true_to, first_false_to, len(self.trace)+1)
-		return to, to_range
-
 	def compute(self, query_id: int, fromm: int, to: int) -> bool:
 		first_true_to = last_true_to = first_false_to = float('inf')
 		if (query_id, fromm, to) not in self.already_asked:
 			self.query_count+=1
 			self.already_asked.add((query_id, fromm, to))
+		else:
+			print("Why double ask?")
+			exit()
 		if (query_id, fromm) in self._cache:
 			first_true_to, last_true_to, first_false_to = self._cache[query_id, fromm]
 			if first_false_to != float('inf'):
@@ -137,20 +134,15 @@ class ShapeExpressionOracle:
 				return True
 		if not self.should_optimize:
 			return self.atomic_match(fromm, to, query_id)
-		fromm_range, to_range = self.calculate_incremental_range(first_true_to, last_true_to, first_false_to, to)
-		result = False
-		final_result = False
-		for i in range(fromm_range, to_range):
+		if (query_id, fromm) not in self._cache:
+			self._cache[query_id, fromm] = {}
+		result = True
+		i = to
+		while i<=len(self.trace) and result:
 			result = self.atomic_match(fromm, i, query_id)
-			if i == to:
-				final_result = result
-			if not result:
-				first_false_to = i
-				break
-			last_true_to = i if last_true_to == float('inf') else max(last_true_to, i)
-			first_true_to = min(first_true_to, i)
-		self._cache[query_id, fromm] = (first_true_to, last_true_to, first_false_to)
-		return final_result
+			self._cache[query_id, fromm][i] = result
+			i+=1
+		return self._cache[query_id, fromm][to]
 	
 	def get_exp_coeffs_integral(self, y, t):
 		n = len(t)
