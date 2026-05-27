@@ -41,7 +41,7 @@ parser = Lark(r"""
 
 # path = ../lyft-dataset/processed
 def match_moving(prop, query_map, dir_path):
-    print("File", "Channel", "Score", "QueryCount", "OracleTime", "Time", sep=',')        
+    print("File", "Channel", "Score", "QueryCount", "Time", sep=',')        
     for file_name in os.listdir(dir_path):
             if 'sample' in file_name:
                  continue
@@ -85,44 +85,59 @@ def sample_from(X, start_range: int, end_range: int, num_samples: int):
 
 # Path: ../PTB-XL/ptb-xl/
 def match_ecg(prop, query_map, path):
-     inputs = input("Enter start range, end range and number of samples separated by space.\n").split(" ")
+     inputs = input("Enter start range, end range, number of samples, threshold and unsoundness param separated by space.\n").split(" ")
      start_range: int = int(inputs[0])
      end_range: int = int(inputs[1])
      num_samples: int = int(inputs[2])
+     threshold: float = float(inputs[3])
+     unsoundness: float = float(inputs[4])
      X = load_ecg_data(path, 500)
      X, X_indices = sample_from(X, start_range, end_range, num_samples)
-     print("File","Score","QueryCount", "OracleTime" ,"Time",sep=',')
-     for i in range(X.shape[0]):
+     print("File","Score","QueryCount","OracleTime", "Time",sep=',')
+     for i in range(num_samples):
           score = -1
           trace = X[i, :]
-          for should_optimize in [True, False]:
+          for incremental_opt, unsoundness_now in [(True, unsoundness), (True, 1), (False, 1)]:
                start_time = time.time()
-               now_oracle = ShapeExpressionOracle(query_map, 0.96, 100, should_optimize)
+               now_oracle = ShapeExpressionOracle(query_map, threshold, unsoundness_now, incremental_opt)
                matcher = Matcher(prop, now_oracle)
                for frame in trace:
                     score = matcher.match(frame) 
                end_time = time.time()
-               optimize_flag = "-o" if should_optimize else "-n"
+               if unsoundness_now == unsoundness:
+                    optimize_flag = "-a"
+               elif incremental_opt:
+                    optimize_flag = "-b"
+               else:
+                    optimize_flag = "-c"
                print(f"{X_indices[i]}{optimize_flag}", score, now_oracle.query_count, matcher.oracle_time, end_time-start_time, sep=',')
 
 # Path = ../aircraft_aggregate/? 
 def match_aircraft(prop, query_map, dir_path):
+     inputs = input("Enter threshold and unsoundness param separated by space.\n").split(" ")
+     threshold: float = float(inputs[0])
+     unsoundness: float = float(inputs[1])
      print("File", "Score", "QueryCount", "OracleTime", "Time", sep=',')  
      for file_name in os.listdir(dir_path):
           file_path = os.path.join(dir_path, file_name)
           df = pd.read_csv(file_path)
           trace = df[df.keys()[1]].to_numpy()
           score = -1
-          for should_optimize in [True, False]:
+          for incremental_opt, unsoundness_now in [(True, unsoundness), (True, 1), (False, 1)]:
                start_time = time.time()
-               now_oracle = ShapeExpressionOracle(query_map, 0.96, 100, should_optimize)
+               now_oracle = ShapeExpressionOracle(query_map, threshold, unsoundness_now, incremental_opt)
                matcher = Matcher(prop, now_oracle)
                for frame in trace:
                     score = matcher.match(frame) 
                end_time = time.time()
-               optimize_flag = "-o" if should_optimize else "-n"
-               print(f"{file_name}{optimize_flag}", score, now_oracle.query_count, matcher.oracle_time, end_time-start_time, sep=',')
-
+               if unsoundness_now == unsoundness:
+                    optimize_flag = "-a"
+               elif incremental_opt:
+                    optimize_flag = "-b"
+               else:
+                    optimize_flag = "-c"
+               print(file_name+optimize_flag, score, now_oracle.query_count, matcher.oracle_time, end_time-start_time, sep=',')
+     #
 ecg_semres = ["[1-1]*[10-30]^<10,30,l_0.01_inf_inf_inf>[10-30]^<10,30,l_inf_-0.01_inf_inf>[10-30]^<10,30,l_0.01_inf_inf_inf>[20-30]^<20,30,e_-3_3_inf_0_inf_0>[1-1]*"]
 aircraft_semres = ["[1-1]*[30-75]^<30,75,l_0.5_inf_inf_inf>[150-250]^<150,250,s_inf_inf_inf_inf_inf_inf_inf_inf>[1-1]*"]
 moving_semres = ["[1-1]*[5-100]^<5,100,car_pedestrian_1.1>[1-1]*",

@@ -81,10 +81,11 @@ class RandomOracle:
 		return response
 	
 class ShapeExpressionOracle:
-	def __init__(self, query_map: dict[str, int], threshold: float, scale_factor: float, should_optimize: bool):
+	def __init__(self, query_map: dict[str, int], threshold: float, unsoundness: float, incremental_opt: bool):
 		warnings.filterwarnings("ignore", category=FutureWarning, module="uncertainties")
 		self._queries: list = [None]*len(query_map)
 		self._threshold = threshold
+		self._unsoundness = unsoundness
 		self._fill_queries(query_map)
 		self._cache = {}
 		self._current_x = np.zeros(0, dtype=int)
@@ -94,9 +95,8 @@ class ShapeExpressionOracle:
 		self._params = {}
 		self._r2 = {}
 		self._funcs = {"e": self.exp, "l": self.lin, "s": self.sinc}
-		self.scale_factor = scale_factor
-		self.already_asked = set()
-		self.should_optimize = should_optimize
+		self.scale_factor = 100
+		self.incremental_opt: bool = incremental_opt
 
 	def _fill_queries(self, query_map):
 		for query_str, query_id in query_map.items():
@@ -116,33 +116,28 @@ class ShapeExpressionOracle:
 			self._queries[query_id] = (parts[0], lb_list, ub_list)
 
 	def compute(self, query_id: int, fromm: int, to: int) -> bool:
-		first_true_to = last_true_to = first_false_to = float('inf')
-		if (query_id, fromm, to) not in self.already_asked:
-			self.query_count+=1
-			self.already_asked.add((query_id, fromm, to))
-		else:
-			print("Why double ask?")
-			exit()
-		if (query_id, fromm) in self._cache:
-			first_true_to, last_true_to, first_false_to = self._cache[query_id, fromm]
-			if first_false_to != float('inf'):
-				if to >= first_false_to:
-					return False
-				if to >= first_true_to:
-					return True
-			elif to>= first_true_to and to <= last_true_to:
-				return True
-		if not self.should_optimize:
-			return self.atomic_match(fromm, to, query_id)
-		if (query_id, fromm) not in self._cache:
-			self._cache[query_id, fromm] = {}
-		result = True
-		i = to
-		while i<=len(self.trace) and result:
-			result = self.atomic_match(fromm, i, query_id)
-			self._cache[query_id, fromm][i] = result
-			i+=1
-		return self._cache[query_id, fromm][to]
+		result_map = self._cache.setdefault((query_id, fromm), {})
+		if to in result_map:
+			return result_map[to]>self._threshold
+		self.query_count += 1
+		i: int = to
+		max_allowed: float = 1
+		last_result: int = 1
+		while i<=len(self.trace) and i not in result_map and last_result>=self._threshold and (i == to or self.incremental_opt):
+			max_allowed: float = self.max_unsound(result_map, fromm, i)
+			result_map[i] = max_allowed if max_allowed<self._threshold else self.atomic_match(fromm, i, query_id)
+			last_result = result_map[i]
+			i += 1
+		return result_map[to]>self._threshold
+	
+	def max_unsound(self, result_map: dict[int, float], fromm: int, to: int) -> float:
+		if self._unsoundness == 1:
+			return 1
+		max_allowed = 1
+		for i in range(fromm, to):
+			if i in result_map and result_map[i]>=0:
+				max_allowed = min(max_allowed, result_map[i]+(to-i)*self._unsoundness)
+		return max_allowed
 	
 	def get_exp_coeffs_integral(self, y, t):
 		n = len(t)
@@ -174,30 +169,33 @@ class ShapeExpressionOracle:
 		_, lb_list, ub_list = self._queries[query_id]
 		trace = self.trace[fromm: to]
 		x = self._current_x[:len(trace)]/self.scale_factor
-		if self.should_optimize and self.incremental_check(fromm, to, x[-1], query_id):
-			return True
+		if self.incremental_opt:
+			is_there, val = self.incremental_check(fromm, to, x[-1], query_id)
+			if is_there:
+				return val
 		coeffs = self.get_exp_coeffs_integral(trace, x)
 		if coeffs is None or not self.check_bounds(lb_list, ub_list, *coeffs):
-			return False
+			return -1
 		a, b, c = coeffs
 		model = self.get_model(self.exp, lb_list, ub_list, a, b, c)
 		result = model.fit(trace, t=x)
-		if result.rsquared<self._threshold:
-			return False
 		best_vals = result.params
 		a, b, c = float(best_vals['a']), float(best_vals['b']), float(best_vals['c'])
 		if b==0 or c==0:
-			return False
-		mean = self.get_trace_mean(fromm, to)
-		pred = a+b*np.exp(c*x)
-		res, tot = self.r2sq(trace-pred, trace, mean)
-		self._params[query_id, fromm, to] = a, b, c
-		self._r2[query_id, fromm, to] = res, tot
-		return True
+			return -1
+		if result.rsquared<self._threshold:
+			return result.rsquared
+		if self.incremental_opt:
+			mean = self.get_trace_mean(fromm, to)
+			pred = a+b*np.exp(c*x)
+			res, tot = self.r2sq(trace-pred, trace, mean)
+			self._params[query_id, fromm, to] = a, b, c
+			self._r2[query_id, fromm, to] = res, tot
+		return result.rsquared
 	
 	def incremental_check(self, fromm, to, x_new, query_id):
 		if (query_id, fromm, to-1) not in self._r2:
-			return False
+			return False, None
 		res, tot = self._r2[query_id, fromm, to-1]
 		mean = self.get_trace_mean(fromm, to)
 		func = self._funcs[self._queries[query_id][0]]
@@ -205,12 +203,12 @@ class ShapeExpressionOracle:
 		y_new = self.trace[to-1]
 		pred_new = func(x_new, *params)
 		res, tot = self.incremental_r2(res, tot, mean, y_new, pred_new, to-fromm-1)
-		r2 = 1-res/tot if tot != 0.0 else 0.0
+		r2 = 1-res/tot if tot != 0.0 else -1
 		if r2 <= self._threshold:
-			return False
+			return False, r2
 		self._r2[query_id, fromm, to] = res, tot
 		self._params[query_id, fromm, to] = self._params[query_id, fromm, to-1]
-		return True
+		return True, r2
 	
 	def incremental_r2(self, res, tot, mean, element_new, pred_new, len):
 		mean_new = (len*mean+element_new)/(len+1)
@@ -232,21 +230,22 @@ class ShapeExpressionOracle:
 		_, lb_list, ub_list = self._queries[query_id]
 		trace = self.trace[fromm: to]
 		x = self._current_x[:len(trace)]
-		if self.should_optimize and self.incremental_check(fromm, to, x[-1], query_id):
-			return True
+		if self.incremental_opt:
+			is_there, val = self.incremental_check(fromm, to, x[-1], query_id)
+			if is_there:
+				return val
 		A = np.column_stack([x, np.ones_like(x)])
 		res = lsq_linear(A, trace, bounds=(lb_list, ub_list))
 		a, b = res.x
 		mean = self.get_trace_mean(fromm, to)
 		res, tot = self.r2sq(trace-(a*x+b), trace, mean)
 		if tot == 0:
-			return False
+			return -1
 		r2 = 1-res/tot
-		if r2>self._threshold:
+		if self.incremental_opt and r2>self._threshold:
 			self._params[query_id, fromm, to] = a, b
 			self._r2[query_id, fromm, to] = res, tot
-			return True
-		return False
+		return r2
 	
 	def get_sinc_coeffs(self, trace):
 		a = np.mean(trace[-10:])
@@ -260,24 +259,27 @@ class ShapeExpressionOracle:
 		_, lb_list, ub_list = self._queries[query_id]
 		trace = self.trace[fromm: to]
 		x = self._current_x[:len(trace)]
-		if self.should_optimzie and self.incremental_check(fromm, to, x[-1], query_id):
-			return True
+		if self.incremental_opt:
+			is_there, val = self.incremental_check(fromm, to, x[-1], query_id)
+			if is_there:
+				return val
 		coeffs = self.get_sinc_coeffs(trace)
 		if coeffs is None or not self.check_bounds(lb_list, ub_list, *coeffs):
-			return False
+			return -1
 		a, b, c, d = coeffs
 		model = self.get_model(self.exp, lb_list, ub_list, a, b, c, d)
 		result = model.fit(trace, t=x)
 		if result.rsquared<self._threshold:
-			return False
-		best_vals = result.params
-		a, b, c, d = float(best_vals['a']), float(best_vals['b']), float(best_vals['c']), float(best_vals['d'])
-		mean = self.get_trace_mean(fromm, to)
-		pred = self.sinc(x, a, b, c, d)
-		res, tot = self.r2sq(trace-pred, trace, mean)
-		self._params[query_id, fromm, to] = a, b, c
-		self._r2[query_id, fromm, to] = res, tot
-		return True
+			return result.rsquared
+		if self.incremental_opt:
+			best_vals = result.params
+			a, b, c, d = float(best_vals['a']), float(best_vals['b']), float(best_vals['c']), float(best_vals['d'])
+			mean = self.get_trace_mean(fromm, to)
+			pred = self.sinc(x, a, b, c, d)
+			res, tot = self.r2sq(trace-pred, trace, mean)
+			self._params[query_id, fromm, to] = a, b, c
+			self._r2[query_id, fromm, to] = res, tot
+		return result.rsquared
 	
 	def get_model(self, func, lb_list, ub_list, *params_initial):
 		model = Model(func)
