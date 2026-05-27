@@ -118,17 +118,16 @@ class ShapeExpressionOracle:
 	def compute(self, query_id: int, fromm: int, to: int) -> bool:
 		result_map = self._cache.setdefault((query_id, fromm), {})
 		if to in result_map:
-			return result_map[to]>self._threshold
+			return 1.0 if result_map[to]>=self._threshold else 0.0
 		self.query_count += 1
 		i: int = to
 		max_allowed: float = 1
-		last_result: int = 1
+		last_result = 1
 		while i<=len(self.trace) and i not in result_map and last_result>=self._threshold and (i == to or self.incremental_opt):
 			max_allowed: float = self.max_unsound(result_map, fromm, i)
-			result_map[i] = max_allowed if max_allowed<self._threshold else self.atomic_match(fromm, i, query_id)
-			last_result = result_map[i]
+			last_result = result_map[i] = max_allowed if max_allowed<self._threshold else self.atomic_match(fromm, i, query_id)
 			i += 1
-		return result_map[to]>self._threshold
+		return 1.0 if result_map[to]>=self._threshold else 0.0
 	
 	def max_unsound(self, result_map: dict[int, float], fromm: int, to: int) -> float:
 		if self._unsoundness == 1:
@@ -175,14 +174,14 @@ class ShapeExpressionOracle:
 				return val
 		coeffs = self.get_exp_coeffs_integral(trace, x)
 		if coeffs is None or not self.check_bounds(lb_list, ub_list, *coeffs):
-			return -1
+			return -1.0
 		a, b, c = coeffs
 		model = self.get_model(self.exp, lb_list, ub_list, a, b, c)
 		result = model.fit(trace, t=x)
 		best_vals = result.params
 		a, b, c = float(best_vals['a']), float(best_vals['b']), float(best_vals['c'])
 		if b==0 or c==0:
-			return -1
+			return -1.0
 		if result.rsquared<self._threshold:
 			return result.rsquared
 		if self.incremental_opt:
@@ -240,7 +239,7 @@ class ShapeExpressionOracle:
 		mean = self.get_trace_mean(fromm, to)
 		res, tot = self.r2sq(trace-(a*x+b), trace, mean)
 		if tot == 0:
-			return -1
+			return -1.0
 		r2 = 1-res/tot
 		if self.incremental_opt and r2>self._threshold:
 			self._params[query_id, fromm, to] = a, b

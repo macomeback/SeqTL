@@ -97,7 +97,7 @@ def match_ecg(prop, query_map, path):
      for i in range(num_samples):
           score = -1
           trace = X[i, :]
-          for incremental_opt, unsoundness_now in [(True, unsoundness), (True, 1), (False, 1)]:
+          for incremental_opt, unsoundness_now in [(True, unsoundness), (True, 1.0), (False, 1.0)]:
                start_time = time.time()
                now_oracle = ShapeExpressionOracle(query_map, threshold, unsoundness_now, incremental_opt)
                matcher = Matcher(prop, now_oracle)
